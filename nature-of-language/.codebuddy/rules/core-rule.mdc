@@ -1,0 +1,81 @@
+---
+description: Core writing principles for English language understanding manuals
+alwaysApply: true
+enabled: true
+updatedAt: 2026-02-08T04:05:13.102Z
+provider: 
+---
+
+# Core Rule: Reveal the Nature, Not Rote
+
+## 🎯 Core Philosophy
+
+**ROTE IS FORBIDDEN.** Every piece of content must reveal **universal logic** that enables readers to **understand and infer**, not memorize.
+
+## ✅ What We DO
+
+1. **Reveal the "WHY"**
+   - Explain the underlying logic behind every rule
+   - Show the semantic reasoning, not just the pattern
+   - Help readers understand so they can deduce new cases themselves
+
+2. **Provide Universal Formulas**
+   - Give transformation logic that applies broadly
+   - Use "question-based" frameworks (e.g., "Who does it?" → `-er`, "What is this action?" → `-tion`)
+   - Enable readers to **derive** answers, not recall them
+
+3. **Show Relationships**
+   - Connect related concepts (opposites, synonyms, chains)
+   - Demonstrate how one principle leads to another
+   - Build mental models, not isolated facts
+
+4. **Use Visual Logic**
+   - Diagrams, flowcharts, decision trees
+   - Show the thinking process, not just results
+   - Make abstract logic concrete and visible
+
+## ❌ What We DON'T DO
+
+1. **No Pure Lists for Memorization**
+   - ❌ "Here are 50 words with `-tion`, memorize them"
+   - ✅ "Here's WHY `-tion` means 'the action itself', now you can recognize any `-tion` word"
+
+2. **No Examples Without Logic**
+   - ❌ Listing word families without explaining the transformation principle
+   - ✅ Showing the semantic question each suffix answers
+
+3. **No Rules Without Reasoning**
+   - ❌ "Just remember: happy → happiness"
+   - ✅ "Adjective + `-ness` = the feeling/state of being that adjective"
+
+4. **No Exceptions Without Context**
+   - ❌ "These 20 words are exceptions, memorize them"
+   - ✅ "These exceptions exist because of [historical/phonetic reason]"
+
+## 📐 Content Structure Principle
+
+Every section should follow:
+
+```
+1. What is the CORE LOGIC? (the nature)
+2. What QUESTION does it answer? (semantic function)
+3. How can readers APPLY it? (inference method)
+4. What are the BOUNDARIES? (when it doesn't apply, and why)
+```
+
+## 🧪 Self-Check Questions
+
+Before finalizing any content, ask:
+
+- [ ] Can a reader **deduce** new examples using this logic?
+- [ ] Does this explain **WHY**, not just **WHAT**?
+- [ ] Is there a **universal pattern** that applies beyond the examples?
+- [ ] Would removing the examples still leave useful knowledge?
+
+**If the answer is NO to any of these, rewrite the content.**
+
+## 💡 Remember
+
+> "Give a man a fish and you feed him for a day. Teach a man to fish and you feed him for a lifetime."
+
+Our goal is to teach **fishing** — the universal logic of English — not to give **fish** — lists of words to memorize.

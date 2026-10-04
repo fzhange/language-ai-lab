@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Words Highlight · 管理</title>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Words Highlight 管理</h1>
+
+    <div class="toolbar">
+      <div class="tabs">
+        <button class="tab active" id="tabAll" data-view="all">所有高亮</button>
+        <button class="tab" id="tabPages" data-view="pages">按页面</button>
+        <button class="tab" id="tabReview" data-view="review">复习</button>
+        <button class="tab" id="tabReport" data-view="report">周报</button>
+        <button class="tab" id="tabChats" data-view="chats">聊天记录</button>
+        <button class="tab" id="tabRelate" data-view="relate">关联</button>
+      </div>
+      <span class="grow"></span>
+      <button class="btn" id="import">导入</button>
+      <button class="btn" id="export">导出 JSON</button>
+      <input type="file" id="importFile" accept="application/json,.json" hidden />
+    </div>
+
+    <div class="searchbar">
+      <input type="search" id="search" placeholder="搜索高亮内容或笔记…" />
+      <span id="pageCount" class="muted"></span>
+    </div>
+
+    <div class="account-card" id="accountCard">
+      <!-- 未登录 -->
+      <div class="acc-login" id="accLogin">
+        <div class="acc-title">云同步</div>
+        <p class="acc-desc">登录后高亮在多台设备间自动同步（Supabase）。</p>
+        <div class="acc-form">
+          <input type="email" id="accEmail" placeholder="邮箱" autocomplete="email" />
+          <input type="password" id="accPassword" placeholder="密码（至少 6 位）" autocomplete="current-password" />
+          <div class="acc-btns">
+            <button class="btn primary" id="accSignIn">登录</button>
+            <button class="btn" id="accSignUp">注册</button>
+          </div>
+          <div class="acc-msg" id="accMsg" hidden></div>
+        </div>
+      </div>
+      <!-- 已登录 -->
+      <div class="acc-user" id="accUser" hidden>
+        <div class="acc-info">
+          <div class="acc-title">云同步已开启</div>
+          <div class="acc-email" id="accEmail2">—</div>
+          <div class="acc-last" id="accLast">上次同步：—</div>
+        </div>
+        <div class="acc-actions">
+          <button class="btn" id="accSyncNow">立即同步</button>
+          <button class="btn danger" id="accSignOut">退出</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="account-card" id="aiCard">
+      <div class="acc-title">AI 服务</div>
+      <p class="acc-desc">连接 highlight-buddy 服务后，可使用 AI 出题复习和每周阅读报告。</p>
+      <div class="acc-form">
+        <input type="text" id="aiBase" placeholder="服务地址，如 http://localhost:8123" />
+        <input type="password" id="aiToken" placeholder="访问令牌（可选）" autocomplete="off" />
+        <div class="acc-btns">
+          <button class="btn primary" id="aiSave">保存设置</button>
+          <button class="btn" id="aiTest">测试连接</button>
+        </div>
+        <div class="acc-msg" id="aiMsg" hidden></div>
+      </div>
+    </div>
+
+    <ul class="items" id="items"></ul>
+    <ul class="pages" id="pages" hidden></ul>
+    <div id="reviewView" hidden></div>
+    <div id="reportView" hidden></div>
+    <div id="chatsView" hidden></div>
+    <div id="relateView" hidden></div>
+    <div class="empty" id="empty" hidden>还没有任何高亮记录。</div>
+
+    <div class="toast" id="toast" hidden></div>
+  </div>
+
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

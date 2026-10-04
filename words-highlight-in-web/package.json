@@ -1,0 +1,25 @@
+{
+  "name": "words-highlight-in-web",
+  "version": "1.0.0",
+  "description": "Chrome 扩展：在网页上高亮单词/句子并做笔记，数据保存在浏览器本地，支持导入导出",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "rm -rf dist",
+    "dev": "wxt",
+    "build": "wxt build",
+    "zip": "wxt zip",
+    "compile": "tsc --noEmit",
+    "postinstall": "wxt prepare"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.270",
+    "typescript": "^5.5.4",
+    "wxt": "^0.19.13"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.116.0",
+    "dompurify": "^3.4.15",
+    "marked": "^18.0.13"
+  }
+}

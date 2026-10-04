@@ -147,3 +147,12 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# LangGraph and Python runtime artifacts across workspaces
+.langgraph_api/
+.venv/
+__pycache__/
+*.py[cod]
+
+# Managed agent runtime artifacts
+.mda/

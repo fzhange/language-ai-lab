@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Words Highlight</title>
+</head>
+<body>
+  <header class="head">
+    <div class="title">高亮</div>
+    <div class="status" id="status">·</div>
+  </header>
+
+  <div class="count" id="count">本页 0 条高亮</div>
+
+  <ul class="list" id="list"></ul>
+  <div class="empty" id="empty" hidden>本页还没有高亮，选中文字即可添加。</div>
+
+  <footer class="foot">
+    <button class="btn danger" id="clear">清空本页</button>
+    <button class="btn" id="options">管理全部</button>
+  </footer>
+
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

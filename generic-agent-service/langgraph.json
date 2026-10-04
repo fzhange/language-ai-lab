@@ -1,0 +1,16 @@
+{
+  "python_version": "3.13",
+  "dependencies": ["."],
+  "graphs": {
+    "highlight-buddy": "./assistants/highlight_buddy/agent.py:make_highlight_buddy",
+    "highlight-quiz": "./assistants/highlight_buddy/study.py:make_quiz_graph",
+    "highlight-report": "./assistants/highlight_buddy/study.py:make_report_graph",
+    "language-mentor": "./assistants/language_mentor/agent.py:make_language_mentor",
+    "writing-coach": "./assistants/language_mentor/study.py:make_writing_coach_graph",
+    "vocab-quiz": "./assistants/language_mentor/study.py:make_vocab_quiz_graph"
+  },
+  "http": {
+    "app": "./notes_http.py:app"
+  },
+  "env": ".env"
+}

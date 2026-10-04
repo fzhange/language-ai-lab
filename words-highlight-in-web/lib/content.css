@@ -1,0 +1,804 @@
+/* 高亮背景色：通过 CSS Custom Highlight API 渲染，不改动页面 DOM */
+::highlight(whw-yellow) { background-color: #ffe08a; color: #1a1a1a; }
+::highlight(whw-amber)  { background-color: #ffd24d; color: #1a1a1a; }
+::highlight(whw-orange) { background-color: #ffc17a; color: #1a1a1a; }
+::highlight(whw-red)    { background-color: #ff9e9e; color: #1a1a1a; }
+::highlight(whw-pink)   { background-color: #f7b0cd; color: #1a1a1a; }
+::highlight(whw-rose)   { background-color: #f58fb4; color: #1a1a1a; }
+::highlight(whw-purple) { background-color: #d7b3f0; color: #1a1a1a; }
+::highlight(whw-violet) { background-color: #c0a6f0; color: #1a1a1a; }
+::highlight(whw-blue)   { background-color: #a6d3f7; color: #1a1a1a; }
+::highlight(whw-sky)    { background-color: #8ec9ff; color: #1a1a1a; }
+::highlight(whw-cyan)   { background-color: #9fe4e8; color: #1a1a1a; }
+::highlight(whw-teal)   { background-color: #8fd6c4; color: #1a1a1a; }
+::highlight(whw-green)  { background-color: #bfe6a6; color: #1a1a1a; }
+::highlight(whw-lime)   { background-color: #d8ec8a; color: #1a1a1a; }
+::highlight(whw-gray)   { background-color: #d5d9de; color: #1a1a1a; }
+
+/* 高亮末尾的角标浮层：标识该高亮含笔记 / 心得。
+   绝对定位（不占文本流，避免行尾高亮时角标被挤到下一行），
+   位置由 JS 按 range 最后一行的 clientRect 计算并随滚动更新。 */
+.whw-badge {
+  position: absolute;
+  z-index: 2147483646;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  white-space: nowrap;
+  opacity: 0.85;
+  transition: opacity 0.12s ease;
+}
+.whw-badge:hover { opacity: 1; }
+.whw-badge > span { display: inline-block; }
+.whw-badge > span + span { margin-left: 1px; }
+
+/* 浮动工具条：固定在视口顶部居中，避免与豆包等划词插件在选区处重叠 */
+.whw-toolbar {
+  position: fixed;
+  left: 50%;
+  top: 24px;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
+  max-width: calc(100vw - 24px);
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(130, 150, 186, 0.22);
+  border-radius: 18px;
+  box-shadow: 0 16px 42px rgba(30, 46, 86, 0.16), 0 2px 8px rgba(30, 46, 86, 0.06);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  line-height: 1;
+  color: #1a1a1a;
+  user-select: none;
+  -webkit-user-select: none;
+  animation: whw-pop 0.14s ease-out;
+}
+
+.whw-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@keyframes whw-pop {
+  from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.whw-toolbar[hidden] { display: none; }
+
+/* 取色圈：单行排列，按色相顺序，不换行避免出现空位 */
+.whw-swatches {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 5px 7px;
+  overflow-x: auto;
+  border: 1px solid #e9edf5;
+  border-radius: 12px;
+  background: #f7f9fc;
+  scrollbar-width: none;
+}
+.whw-swatches::-webkit-scrollbar { display: none; }
+
+.whw-swatch {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.1s ease;
+}
+.whw-swatch:hover { transform: scale(1.14); }
+.whw-swatch.whw-active { border-color: #364f7e; box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(73, 107, 181, 0.34); }
+.whw-swatch:focus-visible { outline: 2px solid #4a6ee0; outline-offset: 2px; }
+
+.whw-sep {
+  flex: none;
+  width: 1px;
+  height: 23px;
+  background: #e1e7f1;
+  margin: 0 2px;
+}
+
+.whw-btn {
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: #444;
+  font-size: 13px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.whw-btn:hover { background: rgba(0, 0, 0, 0.06); }
+.whw-toolbar.whw-ui .whw-toolbar-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid #ebeff7;
+  border-radius: 13px;
+  background: #f7f9fd;
+}
+.whw-toolbar.whw-ui .whw-toolbar-actions > .whw-btn {
+  flex: none;
+  min-height: 30px;
+  padding: 6px 9px;
+  border-radius: 9px;
+  color: #39465d;
+  font: 500 12px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+.whw-toolbar.whw-ui .whw-toolbar-actions > .whw-btn:hover { background: #e9eef8; }
+.whw-toolbar.whw-ui .whw-toolbar-actions > .whw-btn:focus-visible {
+  outline: 2px solid #4a6ee0;
+  outline-offset: 2px;
+}
+.whw-toolbar.whw-ui .whw-toolbar-actions > .whw-chat-action {
+  color: #fff;
+  background: linear-gradient(135deg, #607ff2, #4568dc);
+  box-shadow: 0 2px 6px rgba(73, 102, 220, 0.24);
+  font-weight: 600 !important;
+}
+.whw-toolbar.whw-ui .whw-toolbar-actions > .whw-chat-action:hover {
+  background: linear-gradient(135deg, #5271e8, #3558cf);
+  box-shadow: 0 3px 9px rgba(73, 102, 220, 0.3);
+}
+.whw-toolbar.whw-ui .whw-toolbar-actions > .whw-danger { color: #8f6a72; }
+.whw-toolbar.whw-ui .whw-toolbar-actions > .whw-danger:hover { color: #b54856; background: #fcebee; }
+.whw-toolbar.whw-ui .whw-pronounce {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.whw-toolbar.whw-ui .whw-pronounce svg {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  color: #4d72ae;
+}
+.whw-toolbar.whw-ui .whw-pronounce .whw-pronounce-label { font: inherit !important; }
+.whw-toolbar.whw-ui .whw-toolbar-actions > .whw-pronounce[aria-pressed="true"] {
+  color: #3858b7;
+  background: #e6edff;
+}
+.whw-toolbar.whw-ui .whw-pronounce:disabled { opacity: 0.5; cursor: not-allowed; }
+.whw-btn.whw-danger:hover { background: #ffe5e5; color: #c0392b; }
+.whw-btn.whw-primary {
+  background: #2f6bff;
+  color: #fff;
+}
+.whw-btn.whw-primary:hover { background: #2559e0; }
+
+@media (max-width: 650px) {
+  .whw-toolbar.whw-ui .whw-bar { flex-wrap: wrap; justify-content: center; }
+  .whw-toolbar.whw-ui .whw-swatches { flex: 0 1 100%; }
+  .whw-toolbar.whw-ui .whw-sep { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .whw-toolbar.whw-ui .whw-toolbar-actions > .whw-btn,
+  .whw-toolbar.whw-ui .whw-swatch { transition: none; }
+}
+
+/* 笔记编辑面板 */
+.whw-note-panel {
+  --whw-accent: #2f6bff;
+  --whw-accent-ring: rgba(47, 107, 255, 0.12);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  margin-top: 2px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.07);
+}
+.whw-note-panel[hidden] { display: none; }
+
+.whw-note-quote {
+  position: relative;
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.5;
+  padding: 7px 10px 7px 12px;
+  background: #f7f8fa;
+  border-left: 3px solid var(--whw-accent);
+  border-radius: 6px;
+  word-break: break-word;
+  font-style: italic;
+}
+
+/* 笔记 / 心得 字段 */
+.whw-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.whw-field-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #8a8f98;
+  letter-spacing: 0.2px;
+  user-select: none;
+}
+.whw-field-label-insight { color: #b07d2a; }
+
+.whw-note-input {
+  width: 100%;
+  min-height: 64px;
+  max-height: 260px;
+  resize: vertical;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid #dcdfe4;
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #1a1a1a;
+  background: #fbfbfc;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.whw-note-input::placeholder { color: #b3b8c0; }
+.whw-note-input:hover { border-color: #c7ccd3; }
+.whw-note-input:focus {
+  border-color: #9aa2ad;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(120, 130, 145, 0.14);
+}
+
+.whw-note-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.whw-note-hint {
+  margin-right: auto;
+  font-size: 11px;
+  color: #a0a4ac;
+  user-select: none;
+}
+.whw-note-actions .whw-btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  border-radius: 8px;
+  border: 1px solid #e3e5e9;
+  background: #fff;
+  transition: background 0.12s ease, border-color 0.12s ease, filter 0.12s ease;
+}
+.whw-note-actions .whw-btn:hover { background: #f2f3f5; }
+.whw-note-actions .whw-btn.whw-primary {
+  border-color: var(--whw-accent);
+  background: var(--whw-accent);
+  color: #1a1a1a;
+}
+.whw-note-actions .whw-btn.whw-primary:hover { filter: brightness(0.94); }
+
+/* 笔记悬停卡片：浅色玻璃质感、左右双栏、可选中可点击 */
+.whw-tooltip {
+  position: fixed;
+  z-index: 2147483647;
+  display: flex;
+  gap: 14px;
+  max-width: 720px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #1a1a1a;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 12.5px;
+  line-height: 1.6;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 14px;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.13), 0 2px 8px rgba(0, 0, 0, 0.06);
+  user-select: text;
+  -webkit-user-select: text;
+}
+.whw-tooltip[hidden] { display: none; }
+
+/* 每个面板（笔记 / 心得）为独立列 */
+.whw-tip-sec {
+  flex: 1 1 0;
+  min-width: 200px;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+}
+.whw-tip-sec + .whw-tip-sec {
+  border-left: 1px solid #eef0f2;
+  padding-left: 14px;
+}
+
+.whw-tip-body {
+  flex: 1;
+  color: #3a3f46;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 340px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.whw-tip-body::-webkit-scrollbar { width: 4px; }
+.whw-tip-body::-webkit-scrollbar-thumb { background: #d5d9de; border-radius: 4px; }
+
+/* 面板右下角操作按钮 */
+.whw-tip-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 10px;
+}
+.whw-tip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  border: 1px solid #e3e5e9;
+  background: #fff;
+  color: #4a4f57;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1;
+  padding: 5px 10px;
+  border-radius: 8px;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.whw-tip-btn svg { flex: 0 0 auto; }
+.whw-tip-btn:active { transform: scale(0.96); }
+
+/* 按钮颜色区分类型：笔记=黄、心得=橙 */
+.whw-tip-note .whw-tip-btn {
+  background: #fff7e0;
+  border-color: #f2e0ad;
+  color: #8a6d1a;
+}
+.whw-tip-note .whw-tip-btn:hover { background: #ffefc2; border-color: #e6cf8f; }
+.whw-tip-insight .whw-tip-btn {
+  background: #fdeee2;
+  border-color: #f3d3bd;
+  color: #a85a24;
+}
+.whw-tip-insight .whw-tip-btn:hover { background: #fbe1cd; border-color: #eec2a4; }
+
+.whw-tip-btn-done {
+  background: #e8f7ee !important;
+  border-color: #b9e3c8 !important;
+  color: #1d7a3d !important;
+}
+
+/* tooltip 操作区里的问 AI 按钮 */
+.whw-tip-btn-ai {
+  background: #eef3ff !important;
+  border-color: #cfddfb !important;
+  color: #2f5bd7 !important;
+}
+.whw-tip-btn-ai:hover { background: #dfe9fd !important; border-color: #b8ccf7 !important; }
+
+/* 高亮追问抽屉：内嵌停靠右缘（四周留白 + 圆角），宽度可拖拽。
+   抽屉挂在 <html> 下（body 之外），body 的 transform 不影响它，
+   fixed 始终相对视口，滚动页面不跟随。 */
+.whw-chat {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  height: calc(100vh - 24px);
+  width: 400px;
+  max-width: 85vw;
+  z-index: 2147483647;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  color: #1a1a1a;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  line-height: 1.6;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+  animation: whw-drawer-in 0.18s ease-out;
+}
+.whw-chat[hidden] { display: none; }
+
+@keyframes whw-drawer-in {
+  from { transform: translateX(24px); opacity: 0; }
+  to   { transform: translateX(0); opacity: 1; }
+}
+
+/* 左缘拖拽手柄 */
+.whw-chat-resizer {
+  position: absolute;
+  left: -3px;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: col-resize;
+  z-index: 1;
+}
+.whw-chat-resizer:hover,
+.whw-chat-resizer.active {
+  background: rgba(47, 107, 255, 0.35);
+}
+
+.whw-chat-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #f0f0f2;
+}
+.whw-chat-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.whw-chat-quote {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #6b7280;
+  font-style: italic;
+  line-height: 1.5;
+  word-break: break-word;
+  border-left: 3px solid #f5a97f;
+  padding: 8px 14px 8px 11px;
+  margin: 10px 12px 0;
+  background: #fafafb;
+  border-radius: 0 8px 8px 0;
+  max-height: 64px;
+  overflow: hidden;
+}
+.whw-chat.whw-ui .whw-chat-quote-text {
+  flex: 1;
+  min-width: 0;
+  font: italic 12px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+}
+.whw-chat.whw-ui .whw-chat-pronounce {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  border: 1px solid #d4e1fa;
+  border-radius: 7px;
+  background: #edf3ff;
+  color: #315dbb;
+  font: 600 11px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  cursor: pointer;
+}
+.whw-chat.whw-ui .whw-chat-pronounce:hover { background: #dfe9ff; }
+.whw-chat.whw-ui .whw-chat-pronounce:focus-visible { outline: 2px solid #2f6bff; outline-offset: 2px; }
+.whw-chat.whw-ui .whw-chat-pronounce[aria-pressed="true"] { background: #dbe8ff; }
+.whw-chat.whw-ui .whw-chat-pronounce:disabled { opacity: 0.5; cursor: not-allowed; }
+.whw-chat-speech-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.whw-chat-close {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: #9aa0a8;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.whw-chat-close:hover { background: rgba(0, 0, 0, 0.06); color: #1a1a1a; }
+
+.whw-chat-msgs {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 120px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.whw-chat-msgs::-webkit-scrollbar { width: 4px; }
+.whw-chat-msgs::-webkit-scrollbar-thumb { background: #d5d9de; border-radius: 4px; }
+
+.whw-chat-msg {
+  max-width: 88%;
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+.whw-chat-msg p { margin: 0 0 6px; }
+.whw-chat-msg p:last-child { margin-bottom: 0; }
+.whw-chat-msg ul { padding-left: 18px; margin: 4px 0; }
+.whw-chat-msg h2, .whw-chat-msg h3 { font-size: 13px; margin: 8px 0 4px; }
+.whw-chat-msg blockquote {
+  margin: 6px 0;
+  padding: 4px 10px;
+  border-left: 3px solid #e3e5e9;
+  color: #555;
+}
+.whw-chat-msg pre {
+  margin: 6px 0;
+  padding: 8px 10px;
+  background: #282c34;
+  color: #e6e6e6;
+  border-radius: 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre;
+}
+.whw-chat-msg code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+}
+.whw-chat-msg p code, .whw-chat-msg li code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.whw-chat-user p code { background: rgba(255, 255, 255, 0.18); }
+.whw-chat-msg table { border-collapse: collapse; margin: 6px 0; font-size: 12px; }
+.whw-chat-msg th, .whw-chat-msg td { border: 1px solid #e3e5e9; padding: 4px 8px; }
+.whw-chat-user {
+  align-self: flex-end;
+  background: #2f6bff;
+  color: #fff;
+  border-bottom-right-radius: 4px;
+  white-space: pre-wrap;
+}
+.whw-chat-assistant {
+  align-self: flex-start;
+  background: #f2f3f5;
+  color: #1a1a1a;
+  border-bottom-left-radius: 4px;
+}
+.whw-chat-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  box-sizing: border-box;
+  color: #51617b;
+  background: #f3f6fc;
+  border: 1px solid #e5ebf6;
+  font-style: normal;
+}
+.whw-chat-loading-dots { display: inline-flex; align-items: center; gap: 4px; }
+.whw-chat-loading-dots > span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #5682f5;
+  animation: whw-chat-dot 1.2s ease-in-out infinite;
+}
+.whw-chat-loading-dots > span:nth-child(2) { animation-delay: 0.16s; }
+.whw-chat-loading-dots > span:nth-child(3) { animation-delay: 0.32s; }
+@keyframes whw-chat-dot {
+  0%, 60%, 100% { opacity: 0.45; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .whw-chat-loading-dots > span { animation: none; }
+}
+.whw-chat-error { color: #c0392b; background: #fdecec; }
+
+.whw-chat.whw-ui .whw-chat-activity {
+  align-self: flex-start;
+  display: block;
+  width: min(100%, 320px);
+  max-width: 88%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border: 1px solid #e9edf5;
+  border-radius: 10px;
+  background: #fafbfe;
+  color: #63718a;
+  font: 12px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+}
+.whw-chat.whw-ui .whw-chat-activity > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  min-height: 34px;
+  margin: 0;
+  padding: 7px 12px;
+  color: #475569;
+  font: 600 12px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  list-style: none !important;
+  cursor: pointer;
+  user-select: none;
+}
+.whw-chat.whw-ui .whw-chat-activity > summary > span:first-child {
+  color: inherit;
+  font: inherit !important;
+}
+.whw-chat.whw-ui .whw-chat-activity > summary::-webkit-details-marker { display: none; }
+.whw-chat.whw-ui .whw-chat-activity > summary::before {
+  content: '';
+  flex: 0 0 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #5b85ed;
+}
+.whw-chat.whw-ui .whw-chat-activity > summary::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  margin-left: 3px;
+  border-right: 1.5px solid #8994a7;
+  border-bottom: 1.5px solid #8994a7;
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform 0.15s ease;
+}
+.whw-chat.whw-ui .whw-chat-activity[open] > summary::after { transform: rotate(225deg) translateY(-1px); }
+.whw-chat.whw-ui .whw-chat-activity-status {
+  margin-left: auto;
+  color: #8a96a9;
+  font: 400 11px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+}
+.whw-chat.whw-ui .whw-chat-activity > ol {
+  box-sizing: border-box;
+  max-height: 145px;
+  overflow-y: auto;
+  margin: 0 12px 10px 17px;
+  padding: 2px 0 0 20px;
+  border: 0;
+  background: linear-gradient(#d2dcf0, #d2dcf0) 8px 7px / 1px calc(100% - 14px) no-repeat;
+  list-style: none !important;
+}
+.whw-chat.whw-ui .whw-chat-activity > ol > li {
+  position: relative;
+  display: list-item;
+  margin: 0 0 7px;
+  padding: 0;
+  color: #68768d;
+  font: 400 11.5px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  list-style: none !important;
+}
+.whw-chat.whw-ui .whw-chat-activity > ol > li:last-child { margin-bottom: 0; }
+.whw-chat.whw-ui .whw-chat-activity > ol > li::before {
+  content: '';
+  position: absolute;
+  left: -16px;
+  top: 4px;
+  width: 9px;
+  height: 9px;
+  box-sizing: border-box;
+  border: 2px solid #fafbfe;
+  border-radius: 50%;
+  background: #4f7adf;
+}
+.whw-chat.whw-ui .whw-chat-activity-error > summary::before { background: #d48181; }
+.whw-chat.whw-ui .whw-chat-activity-error .whw-chat-activity-status { color: #c36b6b; }
+@media (prefers-reduced-motion: reduce) {
+  .whw-chat.whw-ui .whw-chat-activity > summary::after { transition: none; }
+}
+
+/* AI 气泡底部的「存为笔记」 */
+.whw-chat-save {
+  display: inline-block;
+  margin-top: 6px;
+  border: none;
+  background: transparent;
+  color: #2f6bff;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 2px 0;
+  border-radius: 4px;
+}
+.whw-chat-save:hover { text-decoration: underline; }
+.whw-chat-save:disabled { color: #1d7a3d; cursor: default; text-decoration: none; }
+
+.whw-chat-chips {
+  display: flex;
+  gap: 6px;
+  padding: 0 12px 8px;
+  flex-wrap: wrap;
+}
+.whw-chat-chips:empty { display: none; }
+.whw-chat-chip {
+  border: 1px solid #dfe4ec;
+  background: #fff;
+  color: #4a4f57;
+  font-size: 11.5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.whw-chat-chip:hover { background: #f2f5fb; border-color: #c8d4ea; }
+
+.whw-chat-inputrow {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid #f0f0f2;
+}
+.whw-chat-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid #dcdfe4;
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  outline: none;
+  background: #fbfbfc;
+  resize: none;
+  overflow-y: auto;
+  max-height: 140px;
+  box-sizing: border-box;
+}
+.whw-chat-input:focus {
+  border-color: #9aa2ad;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(120, 130, 145, 0.14);
+}
+.whw-chat-send {
+  flex: 0 0 auto;
+  border: none;
+  background: #2f6bff;
+  color: #fff;
+  font-size: 13px;
+  padding: 8px 16px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.whw-chat-send:hover { background: #2559e0; }
+
+/* 扩展更新后的刷新提示 */
+.whw-reload-banner {
+  position: fixed;
+  left: 50%;
+  top: 24px;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  padding: 9px 16px;
+  background: rgba(30, 30, 30, 0.95);
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 12px;
+  line-height: 1.4;
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+  user-select: none;
+  -webkit-user-select: none;
+  animation: whw-pop 0.14s ease-out;
+}
