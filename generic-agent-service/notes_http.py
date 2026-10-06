@@ -11,12 +11,28 @@
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from assistants.language_mentor.tools.knowledge import _iter_notes, _root
+from exam_http import router as exam_router
 
 app = FastAPI(title="nature-of-language notes API", docs_url=None, redoc_url=None)
+app.include_router(exam_router)
+
+
+@app.middleware("http")
+async def limit_exam_body(request: Request, call_next):
+    if request.url.path in {"/exam/papers", "/exam/grade"}:
+        if request.headers.get("content-length", "").isdigit() and int(request.headers["content-length"]) > 20000:
+            return JSONResponse({"detail": "练习请求过大"}, status_code=413)
+        chunks = bytearray()
+        async for chunk in request.stream():
+            chunks.extend(chunk)
+            if len(chunks) > 20000:
+                return JSONResponse({"detail": "练习请求过大"}, status_code=413)
+        request._body = bytes(chunks)
+    return await call_next(request)
 
 
 def _extract_title(path: Path) -> str:

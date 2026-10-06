@@ -1,11 +1,12 @@
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom'
 import { useEffect } from 'react'
-import { BookOpenText, ChevronRight, GraduationCap, Highlighter, LogOut, MessageCircle, PenLine, Sparkles, UserRound, ListChecks } from 'lucide-react'
+import { BookOpenText, ChevronRight, GraduationCap, Highlighter, LogOut, MessageCircle, PenLine, Sparkles, UserRound, ListChecks, PanelsTopLeft } from 'lucide-react'
 
 import { AuthGate } from './components/AuthGate'
 import { Button } from './components/ui/button'
 import { useAuth } from './lib/auth'
 import { ChatPage } from './pages/ChatPage'
+import { ExamPracticePage } from './pages/ExamPracticePage'
 import { HighlightsPage } from './pages/HighlightsPage'
 import { NotesPage } from './pages/NotesPage'
 import { QuizPage } from './pages/QuizPage'
@@ -16,6 +17,7 @@ const NAV_ITEMS = [
   { to: '/notes', label: '知识库笔记', description: '整理知识，建立语言直觉', icon: BookOpenText, end: false },
   { to: '/highlights', label: '我的高亮', description: '从你的阅读中发现新知', icon: Highlighter, end: false },
   { to: '/quiz', label: '复习测验', description: '主动回忆，巩固所学', icon: ListChecks, end: false },
+  { to: '/practice', label: '专项练习', description: '语法与阅读，真题和仿真分明', icon: PanelsTopLeft, end: false },
   { to: '/writing', label: '写作批改', description: '练习表达，获得反馈', icon: PenLine, end: false },
 ]
 
@@ -42,7 +44,7 @@ function Shell() {
           </div>
         </div>
         <p className="hidden px-3 pb-3 text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase md:block">学习空间</p>
-        <div className="mt-3 grid grid-cols-5 gap-1 md:mt-0 md:flex md:flex-col">
+        <div className="mt-3 grid grid-cols-3 gap-1 sm:grid-cols-6 md:mt-0 md:flex md:flex-col">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon
             return (
@@ -95,6 +97,7 @@ function Shell() {
             <Route path="/notes" element={<NotesPage />} />
             <Route path="/highlights" element={<HighlightsPage />} />
             <Route path="/quiz" element={<QuizPage />} />
+            <Route path="/practice" element={<ExamPracticePage />} />
             <Route path="/writing" element={<WritingPage />} />
           </Routes>
         </div>

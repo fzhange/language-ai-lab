@@ -72,6 +72,17 @@ CHAT_MODEL=openai:gpt-5.6-terra
 chat completions，所以 `core/model.py` 固定 `use_responses_api=False`——
 deepagents 对 `openai:*` 模型默认走 Responses API，不加这个会 404。
 
+## 专项练习接口
+
+`/exam/papers` 与 `/exam/grade` 是 `notes_http.py` 挂载在 LangGraph Server 上的独立 HTTP 路由；不改变现有 `vocab-quiz`、`highlight-*` 图谱。需配置 `SUPABASE_URL`、`SUPABASE_ANON_KEY` 用于服务端验证登录 JWT，以及 `EXAM_SESSION_KEY`（独立、长期稳定的 Fernet key，通过 `uv run python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'` 生成，**仅通过服务端环境变量保存**）。生产环境应由鉴权网关统一暴露，切勿直接对公网开放 LangGraph Server。
+
+客户端在 `Authorization: Bearer <Supabase JWT>` 中传登录令牌：
+
+- `POST /exam/papers`：请求 `{"level":"cet","topic":"reading","source":"simulated"}`；level 可为 `ielts/cet/senior/junior`，topic 可为 `grammar/reading`，source 可为 `simulated/authentic`。成功返回 `status: ready`、`session`、公开的文章/题干/选项及来源，不返回标准答案；原题无许可时返回 `status: empty` 与提示文本。
+- `POST /exam/grade`：请求 `{"session":"<上一步的凭据>","answers":{"q1":"A"}}`；返回得分、每题正确选项和中文解析。凭据加密并绑定已验证用户，有效期 20 分钟；未答题记为错误，不存储成绩。
+
+真实原题仅从 `assistants/language_mentor/exam_content/manifest.json` 所列**已核实合法许可**的本地文件中读取，清单初始为空。导入前核对 `docs/exam-question-rights.md` 中的授权证据、适用地区/年份/期限及题目和答案。雅思语法无官方独立选择题真题，仅支持 AI 仿真原创练习。模型题一次固定四道，解析中文；生成题结构不合格时重试一次，仍失败报错而非伪造原题。
+
 ## Self-host (TKE)
 
 ```bash
