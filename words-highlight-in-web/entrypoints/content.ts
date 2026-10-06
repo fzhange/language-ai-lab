@@ -3,6 +3,7 @@ import '../lib/content.css';
 import { COLORS, COLOR_CSS, DEFAULT_COLOR, hexToRgba } from '../lib/colors';
 import { quoteFromRange, rangeFromQuote, quoteMatchesStrict } from '../lib/anchor';
 import { renderMarkdown } from '../lib/markdown';
+import { SITE_BLOCKLIST_KEY, getDisabledSites, isSiteDisabled } from '../lib/site-blocklist';
 import type { AgentActivity } from '../lib/ai';
 import type { HighlightItem } from '../lib/types';
 
@@ -39,6 +40,9 @@ export default defineContentScript({
     let lastColor = DEFAULT_COLOR;
     let lastMouseX = 0;
     let lastMouseY = 0;
+    let siteDisabled = true;
+    let siteReady = false;
+    let siteStateVersion = 0;
 
     const LAST_COLOR_KEY = 'whw:lastColor';
 
@@ -63,7 +67,7 @@ export default defineContentScript({
     }
 
     function showReloadBanner() {
-      if (!document.body || document.querySelector('.whw-reload-banner')) return;
+      if (siteDisabled || !document.body || document.querySelector('.whw-reload-banner')) return;
       const el = document.createElement('div');
       el.className = 'whw-reload-banner whw-ui';
       el.textContent = '高亮插件已更新，请刷新本页面后继续使用';
@@ -101,6 +105,7 @@ export default defineContentScript({
 
     // 对当前选区高亮（供右键菜单 / 快捷键调用）
     function highlightCurrentSelection(color: string | null): boolean {
+      if (siteDisabled) return false;
       const c = color && COLOR_CSS[color] ? color : lastColor;
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed || sel.rangeCount === 0) return false;
@@ -180,7 +185,7 @@ export default defineContentScript({
     }
 
     function renderAll() {
-      if (!supported) return;
+      if (siteDisabled || !supported) return;
       rangeMap.clear();
       clearBadges();
       const byColor: Record<string, Range[]> = {};
@@ -210,10 +215,12 @@ export default defineContentScript({
 
     /* ----------------------- 数据 ----------------------- */
     function load() {
+      if (siteDisabled) return;
       const reqUrl = currentUrl();
+      const version = siteStateVersion;
       sendRuntimeMessage({ type: 'load', url: reqUrl }, (resp) => {
-        // 响应回来时页面可能已再次跳转，丢弃过期数据
-        if (currentUrl() !== reqUrl) return;
+        // 响应回来时页面可能已再次跳转或被禁用，丢弃过期数据
+        if (siteDisabled || siteStateVersion !== version || currentUrl() !== reqUrl) return;
         if (resp && resp.ok && Array.isArray(resp.highlights)) {
           highlights = resp.highlights;
         }
@@ -222,12 +229,35 @@ export default defineContentScript({
       });
     }
 
+    function applySiteState(disabled: boolean) {
+      if (siteReady && siteDisabled === disabled) return;
+      siteReady = true;
+      siteDisabled = disabled;
+      siteStateVersion++;
+      if (!disabled) {
+        load();
+        setTimeout(reclaimForeignHighlights, 2500);
+        return;
+      }
+
+      hideToolbar();
+      hideTooltipNow();
+      if (chatPanel && !chatPanel.hasAttribute('hidden')) closeChat();
+      document.querySelector('.whw-reload-banner')?.remove();
+      highlights = [];
+      rangeMap.clear();
+      clearBadges();
+      if (supported) COLORS.forEach((color) => CSS.highlights.delete('whw-' + color.id));
+      reclaimedUrls.clear();
+    }
+
     // 从全局视图跳转过来时（url#whw=<id>）自动滚动
     function maybeScrollToHash() {
       const m = /[#&]whw=([^&]+)/.exec(location.hash || '');
       if (!m) return;
       const id = decodeURIComponent(m[1]);
       setTimeout(() => {
+        if (siteDisabled) return;
         const info = rangeMap.get(id);
         if (!info) return;
         try {
@@ -429,6 +459,7 @@ export default defineContentScript({
         hideToolbar();
       });
       actions.appendChild(del);
+
       el.appendChild(bar);
 
       // 笔记编辑面板
@@ -624,6 +655,7 @@ export default defineContentScript({
     }
 
     function showToolbar(mode: 'create' | 'edit', activeColor: string | null) {
+      if (siteDisabled) return;
       if (currentSpeechButton && toolbar?.contains(currentSpeechButton)) stopChatSpeech();
       if (!toolbar) toolbar = buildToolbar();
       const pronounceBtn = toolbar.querySelector<HTMLButtonElement>('[data-role="toolbar-pronounce"]');
@@ -652,8 +684,9 @@ export default defineContentScript({
 
     /* ----------------------- 事件 ----------------------- */
     function onMouseUp(e: MouseEvent) {
-      if (toolbar && toolbar.contains(e.target as Node)) return;
+      if (siteDisabled || (toolbar && toolbar.contains(e.target as Node))) return;
       setTimeout(() => {
+        if (siteDisabled) return;
         const sel = window.getSelection();
         if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
         const text = sel.toString();
@@ -680,6 +713,7 @@ export default defineContentScript({
     }
 
     function onClick(e: MouseEvent) {
+      if (siteDisabled) return;
       if (toolbar && toolbar.contains(e.target as Node)) return;
       if (tooltip && tooltip.contains(e.target as Node)) return;
       if (chatPanel && chatPanel.contains(e.target as Node)) return;
@@ -1315,6 +1349,7 @@ export default defineContentScript({
     }
 
     function onMouseMove(e: MouseEvent) {
+      if (siteDisabled) return;
       lastMouseX = e.clientX;
       lastMouseY = e.clientY;
       if (toolbar && toolbar.contains(e.target as Node)) return;
@@ -1345,6 +1380,7 @@ export default defineContentScript({
 
     // 点击高亮打开编辑条后，按 Delete / Backspace 删除该高亮
     function onKeyDown(e: KeyboardEvent) {
+      if (siteDisabled) return;
       if (e.key === 'Escape') { closeChat(); hideToolbar(); return; }
       if (e.key !== 'Delete' && e.key !== 'Backspace') return;
       // 焦点在输入框 / 可编辑区域时，删除键应编辑文本而非删高亮
@@ -1375,10 +1411,25 @@ export default defineContentScript({
     /* ----------------------- 与 popup/background 通信 ----------------------- */
     chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       if (!msg || !msg.type) return;
+      if (msg.type === 'getHighlights') {
+        const respond = () => sendResponse({
+          ok: true, url: currentUrl(), supported, disabled: siteDisabled,
+          highlights: siteDisabled ? [] : highlights
+        });
+        if (siteReady) respond();
+        else {
+          getDisabledSites().then((sites) => {
+            if (!siteReady) applySiteState(isSiteDisabled(location.href, sites));
+            respond();
+          }).catch(() => sendResponse({ ok: false }));
+        }
+        return true;
+      }
+      if (siteDisabled) {
+        sendResponse({ ok: false, disabled: true });
+        return true;
+      }
       switch (msg.type) {
-        case 'getHighlights':
-          sendResponse({ ok: true, url: currentUrl(), supported, highlights });
-          return true;
         case 'removeHighlight':
           removeHighlight(msg.id);
           sendResponse({ ok: true });
@@ -1420,12 +1471,12 @@ export default defineContentScript({
     // 误归档的高亮文本锚点只在真正的页面上能强匹配命中，命中即搬迁到当前页。
     const reclaimedUrls = new Set<string>();
     function reclaimForeignHighlights() {
-      if (!supported) return;
+      if (siteDisabled || !supported) return;
       const url = currentUrl();
       if (reclaimedUrls.has(url)) return; // 同一会话同一页面只找回一次
       reclaimedUrls.add(url);
       sendRuntimeMessage({ type: 'findForeign', url }, (resp) => {
-        if (!resp || !resp.ok || !Array.isArray(resp.foreign) || !resp.foreign.length) return;
+        if (siteDisabled || !resp || !resp.ok || !Array.isArray(resp.foreign) || !resp.foreign.length) return;
         if (currentUrl() !== url) return; // 页面已跳转，丢弃
         const byUrl = new Map<string, string[]>();
         for (const f of resp.foreign) {
@@ -1451,6 +1502,7 @@ export default defineContentScript({
       const u = currentUrl();
       if (u === lastKnownUrl) return;
       lastKnownUrl = u;
+      if (siteDisabled) return;
       // 所有变更都已即时 persist，这里直接重置并加载新页面的高亮
       hideToolbar();
       hideTooltipNow();
@@ -1468,7 +1520,7 @@ export default defineContentScript({
     /* ------- hydration / 懒加载导致锚点暂时失效：DOM 变化后自动重试渲染 ------- */
     let lastRenderRetry = 0;
     const mo = new MutationObserver(() => {
-      if (!highlights.length) return;
+      if (siteDisabled || !highlights.length) return;
       if (rangeMap.size >= highlights.length) return; // 全部命中，无需重试
       const now = Date.now();
       if (now - lastRenderRetry < 1000) return;
@@ -1477,8 +1529,16 @@ export default defineContentScript({
     });
     mo.observe(document.body, { childList: true, subtree: true, characterData: true });
 
-    load();
-    // 延迟执行，等页面主体内容渲染完成后再做找回匹配
-    setTimeout(reclaimForeignHighlights, 2500);
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local') return;
+      const change = changes[SITE_BLOCKLIST_KEY + location.hostname];
+      if (change) applySiteState(change.newValue === true);
+    });
+    const initialVersion = siteStateVersion;
+    getDisabledSites().then((sites) => {
+      if (siteStateVersion === initialVersion) applySiteState(isSiteDisabled(location.href, sites));
+    }).catch((error) => {
+      console.warn('[whw] 无法读取网站黑名单', error);
+    });
   }
 });

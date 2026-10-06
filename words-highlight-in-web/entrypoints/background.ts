@@ -1,8 +1,8 @@
 import { defineBackground } from 'wxt/sandbox';
 import { COLORS } from '../lib/colors';
+import { SITE_BLOCKLIST_KEY, getDisabledSites, isSiteDisabled } from '../lib/site-blocklist';
 import type { HighlightItem } from '../lib/types';
 import * as store from '../lib/sync-store';
-import * as review from '../lib/review';
 import { runGraph, extractJson, pingAiService, createThread, runOnThread, streamOnThread, getThreadMessages } from '../lib/ai';
 import { signIn, signUp, signOut, getAuthState, saveChatTurn, fetchChatMessages, listChatThreads } from '../lib/supabase';
 
@@ -215,41 +215,6 @@ async function handleListChats() {
   }
 }
 
-/* ----------------------- 每日复习提醒 ----------------------- */
-const REVIEW_ALARM = 'whw-review-daily';
-const REVIEW_NOTIFICATION = 'whw-review-daily';
-
-function nextEvening(hour = 20): number {
-  const now = new Date();
-  const next = new Date(now);
-  next.setHours(hour, 0, 0, 0);
-  if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 1);
-  return next.getTime();
-}
-
-async function countDueHighlights(): Promise<number> {
-  const pages = await store.listPages();
-  const stats = await review.getReviewStats();
-  let n = 0;
-  for (const p of pages) {
-    const items = await store.getPage(p.url);
-    n += review.dueItems(items, stats).length;
-  }
-  return n;
-}
-
-async function maybeNotifyReview() {
-  if (!chrome.notifications) return;
-  const due = await countDueHighlights().catch(() => 0);
-  if (!due) return;
-  chrome.notifications.create(REVIEW_NOTIFICATION, {
-    type: 'basic',
-    iconUrl: '/icons/icon128.png',
-    title: '该复习啦',
-    message: `你有 ${due} 条高亮待复习，点开开始今天的练习。`
-  });
-}
-
 export default defineBackground(() => {
   // 启动：迁移旧数据（幂等）→ 后台增量同步
   (async () => {
@@ -257,24 +222,15 @@ export default defineBackground(() => {
     try { await store.syncNow(); } catch (e) { console.warn('[whw] 启动同步失败', e); }
   })();
 
-  // 定时增量同步（每 5 分钟）+ 每日复习提醒（默认 20:00）
+  // 保留每 5 分钟同步；清理旧版已注册的每日复习提醒。
   if (chrome.alarms) {
+    chrome.alarms.clear('whw-review-daily');
     chrome.alarms.create('whw-sync', { periodInMinutes: 5 });
-    chrome.alarms.create(REVIEW_ALARM, { when: nextEvening(), periodInMinutes: 24 * 60 });
     chrome.alarms.onAlarm.addListener((alarm) => {
       if (alarm.name === 'whw-sync') store.syncNow().catch(() => {});
-      if (alarm.name === REVIEW_ALARM) maybeNotifyReview().catch(() => {});
     });
   }
-
-  // 点击复习提醒 → 打开管理页复习 tab
-  if (chrome.notifications) {
-    chrome.notifications.onClicked.addListener((id) => {
-      if (id !== REVIEW_NOTIFICATION) return;
-      chrome.tabs.create({ url: chrome.runtime.getURL('options.html') + '#review' });
-      chrome.notifications.clear(id);
-    });
-  }
+  if (chrome.notifications) chrome.notifications.clear('whw-review-daily');
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!msg || !msg.type) return;
@@ -319,6 +275,21 @@ export default defineBackground(() => {
   });
 
   /* ----------------------- 右键菜单 ----------------------- */
+  let menuUpdateVersion = 0;
+  async function refreshMenuVisibility() {
+    const version = ++menuUpdateVersion;
+    try {
+      const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const sites = await getDisabledSites();
+      if (version !== menuUpdateVersion || !tabs[0]?.url) return;
+      chrome.contextMenus.update('whw-highlight', {
+        visible: !isSiteDisabled(tabs[0].url, sites)
+      }, () => { void chrome.runtime.lastError; });
+    } catch (error) {
+      console.warn('[whw] 无法更新右键菜单', error);
+    }
+  }
+
   function buildMenus() {
     if (!chrome.contextMenus) return;
     chrome.contextMenus.removeAll(() => {
@@ -347,11 +318,23 @@ export default defineBackground(() => {
           contexts: ['selection']
         });
       }
+      void refreshMenuVisibility();
     });
   }
 
   chrome.runtime.onInstalled.addListener(buildMenus);
   chrome.runtime.onStartup.addListener(buildMenus);
+  chrome.tabs.onActivated.addListener(() => { void refreshMenuVisibility(); });
+  chrome.tabs.onUpdated.addListener((_tabId, change, tab) => {
+    if (tab.active && change.url) void refreshMenuVisibility();
+  });
+  chrome.windows.onFocusChanged.addListener(() => { void refreshMenuVisibility(); });
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && Object.keys(changes).some((key) => key.startsWith(SITE_BLOCKLIST_KEY))) {
+      void refreshMenuVisibility();
+    }
+  });
+  void refreshMenuVisibility();
 
   chrome.contextMenus.onClicked.addListener((info, tab) => {
     if (!tab || tab.id == null) return;

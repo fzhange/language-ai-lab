@@ -13,10 +13,6 @@
       <div class="tabs">
         <button class="tab active" id="tabAll" data-view="all">所有高亮</button>
         <button class="tab" id="tabPages" data-view="pages">按页面</button>
-        <button class="tab" id="tabReview" data-view="review">复习</button>
-        <button class="tab" id="tabReport" data-view="report">周报</button>
-        <button class="tab" id="tabChats" data-view="chats">聊天记录</button>
-        <button class="tab" id="tabRelate" data-view="relate">关联</button>
       </div>
       <span class="grow"></span>
       <button class="btn" id="import">导入</button>
@@ -60,7 +56,7 @@
 
     <div class="account-card" id="aiCard">
       <div class="acc-title">AI 服务</div>
-      <p class="acc-desc">连接 highlight-buddy 服务后，可使用 AI 出题复习和每周阅读报告。</p>
+      <p class="acc-desc">连接 highlight-buddy 服务后，可在网页高亮上使用 AI 对话。</p>
       <div class="acc-form">
         <input type="text" id="aiBase" placeholder="服务地址，如 http://localhost:8123" />
         <input type="password" id="aiToken" placeholder="访问令牌（可选）" autocomplete="off" />
@@ -72,12 +68,15 @@
       </div>
     </div>
 
+    <div class="account-card" id="disabledSitesCard">
+      <div class="acc-title">禁用网站（黑名单）</div>
+      <p class="acc-desc">以下域名的所有页面不显示插件；已有高亮和笔记仍会保留。移除后即可恢复。</p>
+      <ul class="disabled-sites" id="disabledSites"></ul>
+      <p class="acc-desc" id="disabledSitesEmpty">暂无禁用网站。</p>
+    </div>
+
     <ul class="items" id="items"></ul>
     <ul class="pages" id="pages" hidden></ul>
-    <div id="reviewView" hidden></div>
-    <div id="reportView" hidden></div>
-    <div id="chatsView" hidden></div>
-    <div id="relateView" hidden></div>
     <div class="empty" id="empty" hidden>还没有任何高亮记录。</div>
 
     <div class="toast" id="toast" hidden></div>

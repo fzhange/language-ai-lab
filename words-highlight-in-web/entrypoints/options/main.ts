@@ -2,11 +2,8 @@ import './style.css';
 import { COLOR_CSS } from '../../lib/colors';
 import type { HighlightItem } from '../../lib/types';
 import { getAiConfig, setAiConfig } from '../../lib/ai';
-import { renderReview } from './review';
-import { renderReport } from './report';
-import { renderChats } from './chats';
-import { renderRelate } from './relate';
-import type { OptionsCtx, PageCache } from './ctx';
+import { SITE_BLOCKLIST_KEY, enableSite, getDisabledSites } from '../../lib/site-blocklist';
+import type { PageCache } from './ctx';
 
 const pagesEl = document.getElementById('pages') as HTMLUListElement;
 const itemsEl = document.getElementById('items') as HTMLUListElement;
@@ -14,13 +11,7 @@ const emptyEl = document.getElementById('empty') as HTMLDivElement;
 const pageCountEl = document.getElementById('pageCount') as HTMLSpanElement;
 const searchEl = document.getElementById('search') as HTMLInputElement;
 const toastEl = document.getElementById('toast') as HTMLDivElement;
-const reviewEl = document.getElementById('reviewView') as HTMLDivElement;
-const reportEl = document.getElementById('reportView') as HTMLDivElement;
-const chatsEl = document.getElementById('chatsView') as HTMLDivElement;
-const relateEl = document.getElementById('relateView') as HTMLDivElement;
-const searchbarEl = document.querySelector('.searchbar') as HTMLDivElement;
-
-type View = 'all' | 'pages' | 'review' | 'report' | 'chats' | 'relate';
+type View = 'all' | 'pages';
 
 interface ListPage {
   url: string;
@@ -171,14 +162,6 @@ function openAt(url: string, id?: string) {
   chrome.tabs.create({ url: target });
 }
 
-// 新视图共享的上下文
-const ctx: OptionsCtx = {
-  getCache: () => cache,
-  send,
-  toast,
-  openAt
-};
-
 function makeHighlightRow(h: HighlightItem, page: PageCache | null): HTMLLIElement {
   const li = document.createElement('li');
   li.className = 'hi';
@@ -302,21 +285,11 @@ function renderPagesView() {
 function render() {
   const isAll = view === 'all';
   const isPages = view === 'pages';
-  const isDataView = isAll || isPages;
   itemsEl.hidden = !isAll;
   pagesEl.hidden = !isPages;
-  reviewEl.hidden = view !== 'review';
-  reportEl.hidden = view !== 'report';
-  chatsEl.hidden = view !== 'chats';
-  relateEl.hidden = view !== 'relate';
   emptyEl.hidden = true;
-  searchbarEl.hidden = !isDataView;
   if (isAll) renderAllView();
   else if (isPages) renderPagesView();
-  else if (view === 'review') void renderReview(reviewEl, ctx);
-  else if (view === 'report') renderReport(reportEl, ctx);
-  else if (view === 'chats') void renderChats(chatsEl, ctx);
-  else renderRelate(relateEl, ctx);
 }
 
 /* ----------------------- 视图切换 ----------------------- */
@@ -442,8 +415,52 @@ document.getElementById('aiTest')!.addEventListener('click', async () => {
   else showAiMsg('连接失败：' + ((resp && resp.error) || '无法访问服务'));
 });
 
-// 通知点击跳转：#review 直接进入复习 tab
-if (location.hash === '#review') switchView('review');
+/* ----------------------- 禁用网站 ----------------------- */
+const disabledSitesEl = document.getElementById('disabledSites') as HTMLUListElement;
+const disabledSitesEmptyEl = document.getElementById('disabledSitesEmpty') as HTMLParagraphElement;
+let siteRenderVersion = 0;
+
+async function renderDisabledSites() {
+  const version = ++siteRenderVersion;
+  try {
+    const sites = await getDisabledSites();
+    if (version !== siteRenderVersion) return;
+    disabledSitesEl.replaceChildren();
+    disabledSitesEmptyEl.hidden = sites.length > 0;
+    for (const site of sites) {
+      const li = document.createElement('li');
+      const label = document.createElement('span');
+      label.textContent = site;
+      const remove = document.createElement('button');
+      remove.className = 'btn';
+      remove.type = 'button';
+      remove.textContent = '移除';
+      remove.setAttribute('aria-label', `从黑名单移除 ${site}`);
+      remove.addEventListener('click', async () => {
+        remove.disabled = true;
+        try {
+          await enableSite(site);
+          await renderDisabledSites();
+          toast(`已在 ${site} 恢复插件`);
+        } catch {
+          remove.disabled = false;
+          toast('移除失败，请重试');
+        }
+      });
+      li.append(label, remove);
+      disabledSitesEl.appendChild(li);
+    }
+  } catch {
+    toast('读取禁用网站失败');
+  }
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && Object.keys(changes).some((key) => key.startsWith(SITE_BLOCKLIST_KEY))) {
+    void renderDisabledSites();
+  }
+});
+void renderDisabledSites();
 
 refreshAccount();
 loadData();

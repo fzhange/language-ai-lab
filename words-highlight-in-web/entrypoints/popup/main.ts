@@ -1,17 +1,42 @@
 import './style.css';
 import type { HighlightItem } from '../../lib/types';
+import { disableSite } from '../../lib/site-blocklist';
 
 const listEl = document.getElementById('list') as HTMLUListElement;
 const emptyEl = document.getElementById('empty') as HTMLDivElement;
 const countEl = document.getElementById('count') as HTMLDivElement;
 const statusEl = document.getElementById('status') as HTMLDivElement;
+const disableSiteBtn = document.getElementById('disableSite') as HTMLButtonElement;
 
 let currentTabId: number | null = null;
+let currentHostname: string | null = null;
+let currentTabUrl: string | null = null;
+
+function hostnameOf(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') ? parsed.hostname : null;
+  } catch {
+    return null;
+  }
+}
 
 interface HighlightsResponse {
   ok: boolean;
+  url?: string;
   supported?: boolean;
+  disabled?: boolean;
   highlights?: HighlightItem[];
+}
+
+function activeTab(): Promise<chrome.tabs.Tab | null> {
+  return new Promise((resolve) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (chrome.runtime.lastError) return resolve(null);
+      resolve(tabs?.[0] || null);
+    });
+  });
 }
 
 function sendToTab<T = unknown>(message: Record<string, unknown>): Promise<T | null> {
@@ -82,16 +107,48 @@ function render(highlights?: HighlightItem[]) {
   }
 }
 
+function showDisabled() {
+  listEl.replaceChildren();
+  countEl.textContent = '该网站已禁用高亮';
+  statusEl.textContent = '已禁用';
+  emptyEl.hidden = false;
+  emptyEl.textContent = '可在管理页的禁用网站列表中移除该域名以恢复插件。';
+  disableSiteBtn.hidden = true;
+  (document.getElementById('clear') as HTMLButtonElement).disabled = true;
+  currentHostname = null;
+}
+
 async function refresh() {
+  disableSiteBtn.hidden = true;
+  currentHostname = null;
   const resp = await sendToTab<HighlightsResponse>({ type: 'getHighlights' });
+  const clearBtn = document.getElementById('clear') as HTMLButtonElement;
+  clearBtn.disabled = !resp || !resp.ok || !!resp.disabled;
   if (!resp) {
     countEl.textContent = '此页面不支持高亮';
     emptyEl.hidden = false;
     emptyEl.textContent = '当前页面无法注入脚本（如浏览器内置页面）。';
     return;
   }
+  if (!resp.ok) {
+    countEl.textContent = '无法读取当前页面状态';
+    emptyEl.hidden = false;
+    emptyEl.textContent = '请刷新页面后重试。';
+    return;
+  }
+  if (resp.disabled) {
+    showDisabled();
+    return;
+  }
   if (resp.supported === false) {
     statusEl.textContent = '浏览器不支持高亮 API';
+  } else {
+    const hostname = hostnameOf(currentTabUrl);
+    if (hostname && (!resp.url || hostnameOf(resp.url) === hostname)) {
+      currentHostname = hostname;
+      disableSiteBtn.hidden = false;
+      disableSiteBtn.title = `在 ${hostname} 的所有页面禁用插件`;
+    }
   }
   render(resp.highlights);
 }
@@ -106,9 +163,33 @@ document.getElementById('options')!.addEventListener('click', () => {
   chrome.tabs.create({ url: chrome.runtime.getURL('options.html') });
 });
 
-chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-  if (tabs && tabs[0] && tabs[0].id != null) {
-    currentTabId = tabs[0].id;
-    refresh();
+disableSiteBtn.addEventListener('click', async () => {
+  const hostname = currentHostname;
+  const tabId = currentTabId;
+  if (!hostname || tabId == null || disableSiteBtn.disabled) return;
+  if (!window.confirm(`确定在 ${hostname} 的所有页面禁用插件吗？已有高亮和笔记会保留，可在管理页恢复。`)) return;
+  disableSiteBtn.disabled = true;
+  try {
+    const tab = await activeTab();
+    if (!tab || tab.id !== tabId || hostnameOf(tab.url || null) !== hostname) {
+      statusEl.textContent = '页面已变化，请重新打开弹窗';
+      disableSiteBtn.hidden = true;
+      currentHostname = null;
+      return;
+    }
+    await disableSite(hostname);
+    showDisabled();
+  } catch {
+    statusEl.textContent = '禁用失败，请重试';
+  } finally {
+    disableSiteBtn.disabled = false;
+  }
+});
+
+void activeTab().then((tab) => {
+  if (tab?.id != null) {
+    currentTabId = tab.id;
+    currentTabUrl = tab.url || null;
+    void refresh();
   }
 });

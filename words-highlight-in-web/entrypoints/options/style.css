@@ -149,6 +149,20 @@ h1 { font-size: 22px; margin-bottom: 20px; }
 .acc-last { font-size: 11px; color: #999; margin-top: 2px; }
 .acc-actions { display: flex; gap: 8px; flex: 0 0 auto; }
 
+.disabled-sites { list-style: none; }
+.disabled-sites li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid #eee;
+  font-size: 13px;
+}
+.disabled-sites li span { min-width: 0; overflow-wrap: anywhere; }
+.disabled-sites .btn { flex: none; }
+.disabled-sites .btn:disabled { opacity: 0.5; cursor: wait; }
+
 /* 高亮条目（所有高亮视图 / 页面内） */
 .items { list-style: none; }
 .hi {
