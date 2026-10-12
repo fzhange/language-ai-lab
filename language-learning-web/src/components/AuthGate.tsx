@@ -48,15 +48,15 @@ export function AuthGate({ children }: { children: ReactNode }) {
         <CardContent>
           <form onSubmit={onSubmit} className="space-y-4">
             <div className="space-y-2">
-              <label htmlFor="login-email" className="text-sm font-medium">邮箱</label>
+              <label htmlFor="login-email" className="text-base font-medium">邮箱</label>
               <Input id="login-email" type="email" required autoComplete="email" placeholder="name@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
             </div>
             <div className="space-y-2">
-              <label htmlFor="login-password" className="text-sm font-medium">密码</label>
+              <label htmlFor="login-password" className="text-base font-medium">密码</label>
               <Input id="login-password" type="password" required autoComplete={mode === 'signIn' ? 'current-password' : 'new-password'} placeholder="输入密码" value={password} onChange={(e) => setPassword(e.target.value)} />
             </div>
             <Button type="submit" disabled={submitting} className="w-full"><Sparkles />{submitting ? '请稍候…' : mode === 'signIn' ? '登录' : '注册'}</Button>
-            <Button variant="link" type="button" onClick={() => { setMode(mode === 'signIn' ? 'signUp' : 'signIn'); setMessage('') }} className="w-full text-xs">
+            <Button variant="link" type="button" onClick={() => { setMode(mode === 'signIn' ? 'signUp' : 'signIn'); setMessage('') }} className="w-full text-sm">
               {mode === 'signIn' ? '没有账号？去注册' : '已有账号？去登录'}
             </Button>
             {message && <p role="status" className="text-center text-xs text-destructive">{message}</p>}

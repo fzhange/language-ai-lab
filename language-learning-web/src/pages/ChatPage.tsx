@@ -98,12 +98,12 @@ export function ChatPage() {
   )
 
   return (
-    <div className="mx-auto flex h-full min-h-0 w-full max-w-5xl flex-col gap-4 px-4 py-5 sm:px-8 sm:py-6">
+    <div className="mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col gap-4 px-4 py-5 sm:px-6 sm:py-6">
       <div className="flex items-center gap-3 border-b pb-4">
         <span className="flex size-10 items-center justify-center rounded-xl bg-accent text-primary"><MessageCircle className="size-5" /></span>
         <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-semibold">和语言导师聊聊</h2>
-          <p className="text-xs text-muted-foreground">从原理出发，让每一个疑问都有答案</p>
+          <h2 className="text-xl font-semibold">和语言导师聊聊</h2>
+          <p className="text-sm text-muted-foreground">从原理出发，让每一个疑问都有答案</p>
         </div>
         <Badge variant="outline" className="hidden border-primary/20 bg-accent/50 text-primary sm:inline-flex"><Sparkles />AI 导师</Badge>
       </div>
@@ -113,8 +113,8 @@ export function ChatPage() {
         {visibleMessages.length === 0 && (
           <Card className="mx-auto mt-8 max-w-lg items-center gap-3 border-primary/10 bg-card px-6 py-10 text-center shadow-sm sm:mt-16">
             <span className="flex size-12 items-center justify-center rounded-2xl bg-accent text-primary"><Sparkles className="size-6" /></span>
-            <h3 className="text-lg font-semibold">好奇，是学习的开始</h3>
-            <p className="text-sm leading-relaxed text-muted-foreground">你可以问我任何英语学习中的疑问。<br />试试「in 和 on 到底怎么区分？」或「帮我讲讲现在完成时」。</p>
+            <h3 className="text-xl font-semibold">好奇，是学习的开始</h3>
+            <p className="text-base leading-relaxed text-muted-foreground">你可以问我任何英语学习中的疑问。<br />试试「in 和 on 到底怎么区分？」或「帮我讲讲现在完成时」。</p>
           </Card>
         )}
         {visibleMessages.map((msg, i) => {
@@ -168,7 +168,7 @@ export function ChatPage() {
           return (
             <div key={msg.id ?? i} className={`flex ${isHuman ? 'justify-end' : 'justify-start'}`}>
               <div
-                className={`max-w-[95%] rounded-xl px-4 py-3 text-sm leading-relaxed sm:max-w-[85%] ${
+                className={`max-w-[95%] rounded-xl px-4 py-3 text-base leading-relaxed sm:max-w-[85%] ${
                   isHuman
                     ? 'bg-primary text-primary-foreground shadow-sm'
                     : 'border bg-card text-card-foreground shadow-sm'

@@ -39,8 +39,8 @@ function Shell() {
             <GraduationCap className="size-5" />
           </span>
           <div className="min-w-0">
-            <h1 className="text-sm font-bold tracking-tight">Language Lab</h1>
-            <p className="text-[11px] text-muted-foreground">Understand, don't memorize.</p>
+            <h1 className="text-base font-bold tracking-tight">Language Lab</h1>
+            <p className="text-xs text-muted-foreground">Understand, don't memorize.</p>
           </div>
         </div>
         <p className="hidden px-3 pb-3 text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase md:block">学习空间</p>
@@ -53,7 +53,7 @@ function Shell() {
                 to={item.to}
                 end={item.end}
                 className={({ isActive }) =>
-                  `flex min-w-0 flex-col items-center gap-1 rounded-lg px-0.5 py-2 text-[10px] whitespace-nowrap transition-colors md:w-full md:flex-row md:gap-3 md:px-3 md:py-2.5 md:text-sm ${
+                  `flex min-w-0 flex-col items-center gap-1 rounded-lg px-0.5 py-2 text-xs whitespace-nowrap transition-colors md:w-full md:flex-row md:gap-3 md:px-3 md:py-2.5 md:text-base ${
                     isActive
                       ? 'bg-accent font-semibold text-primary'
                       : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
@@ -80,12 +80,12 @@ function Shell() {
       </nav>
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="flex h-16 shrink-0 items-center justify-between border-b bg-card/80 px-5 sm:px-8">
-          <div className="flex min-w-0 items-center gap-2 text-sm">
+          <div className="flex min-w-0 items-center gap-2 text-base">
             <span className="hidden text-muted-foreground sm:inline">学习空间</span>
             <ChevronRight className="hidden size-4 text-muted-foreground/60 sm:inline" />
             <span className="font-semibold">{current.label}</span>
           </div>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Sparkles className="size-4 text-primary" />
             <span className="hidden sm:inline">{current.description}</span>
             {supabaseReady && user && <Button variant="ghost" size="icon" className="size-8 md:hidden" aria-label="退出登录" onClick={() => void signOut()}><LogOut /></Button>}

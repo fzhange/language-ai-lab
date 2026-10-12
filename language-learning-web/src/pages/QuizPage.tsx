@@ -66,13 +66,13 @@ export function QuizPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-4xl space-y-6 px-4 py-6 sm:px-8">
+    <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-6 sm:px-6">
       <header className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <span className="flex size-10 items-center justify-center rounded-xl bg-accent text-primary"><ListChecks className="size-5" /></span>
           <div>
-            <h2 className="text-lg font-semibold">复习测验</h2>
-            <p className="mt-1 text-xs text-muted-foreground">题目来自你在 Words Highlight 插件里划过的高亮</p>
+            <h2 className="text-xl font-semibold">复习测验</h2>
+            <p className="mt-1 text-sm text-muted-foreground">题目来自你在 Words Highlight 插件里划过的高亮</p>
           </div>
         </div>
         <Button onClick={() => void start()} disabled={phase === 'loading' || phase === 'grading'}>
@@ -96,7 +96,7 @@ export function QuizPage() {
 
       {phase === 'answering' && (
         <Card className="gap-4 p-6">
-          <label htmlFor="quiz-answers" className="text-sm font-medium">你的答案（如：1A 2B 3. …）</label>
+          <label htmlFor="quiz-answers" className="text-base font-medium">你的答案（如：1A 2B 3. …）</label>
           <Textarea id="quiz-answers" value={answers} onChange={(e) => setAnswers(e.target.value)} rows={4} placeholder="1A 2C 3. The word abandon means..." />
           <Button onClick={() => void submitAnswers()} disabled={!answers.trim()} className="self-start"><ArrowRight />提交答案</Button>
         </Card>
@@ -108,7 +108,7 @@ export function QuizPage() {
 
       {grading && (
         <Card className="gap-3 border-primary/20 bg-accent/30 p-6">
-          <h3 className="text-sm font-semibold text-primary">批改结果</h3>
+          <h3 className="text-lg font-semibold text-primary">批改结果</h3>
           <MarkdownView>{grading}</MarkdownView>
         </Card>
       )}
@@ -117,7 +117,7 @@ export function QuizPage() {
         <Card className="items-center gap-3 px-6 py-16 text-center">
           <span className="flex size-12 items-center justify-center rounded-xl bg-accent text-primary"><ListChecks className="size-6" /></span>
           <h3 className="font-semibold">准备好检验学习成果了吗？</h3>
-          <p className="text-sm text-muted-foreground">点击「开始测验」，导师会基于你划过的高亮生成 5-8 道题</p>
+          <p className="text-base text-muted-foreground">点击「开始测验」，导师会基于你划过的高亮生成 5-8 道题</p>
         </Card>
       )}
     </div>

@@ -7,10 +7,10 @@ export function MarkdownView({ children, compact = false }: { children: string; 
   return (
     <div
       className={[
-        'prose prose-neutral prose-sm max-w-none leading-relaxed text-foreground',
+        'prose prose-neutral max-w-none leading-relaxed text-foreground',
         'prose-headings:font-semibold prose-headings:text-foreground',
         compact
-          ? 'inline !text-sm prose-headings:my-1 prose-p:my-0 prose-p:text-foreground prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-li:text-foreground [&>p:first-child]:inline'
+          ? 'inline !text-base prose-headings:my-1 prose-p:my-0 prose-p:text-foreground prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-li:text-foreground [&>p:first-child]:inline'
           : 'prose-headings:mt-4 prose-headings:mb-2 prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5',
         // 行内代码
         'prose-code:rounded prose-code:bg-accent prose-code:px-1 prose-code:py-0.5 prose-code:text-[0.85em] prose-code:text-primary prose-code:before:content-none prose-code:after:content-none',
