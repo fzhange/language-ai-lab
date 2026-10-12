@@ -28,6 +28,15 @@ const paper: ExamPaper = {
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
 describe('ExamPracticePage', () => {
+  it('keeps the practice introduction compact and free of decorative chips', () => {
+    render(<ExamPracticePage />)
+    const heading = screen.getByRole('heading', { name: '让每一道题，都成为理解的起点。' })
+    const banner = heading.closest('section')
+    expect(banner?.className).toContain('py-5')
+    expect(banner?.textContent).toContain('聚焦语法与阅读理解')
+    expect(screen.queryByText('四类学习阶段')).toBeNull()
+  })
+
   it('switches exam tabs and issues simulated reading questions without revealing answers', async () => {
     vi.mocked(createExam).mockResolvedValue(paper)
     const user = userEvent.setup()
