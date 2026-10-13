@@ -1,11 +1,12 @@
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom'
 import { useEffect } from 'react'
-import { BookOpenText, ChevronRight, GraduationCap, Highlighter, LogOut, MessageCircle, PenLine, Sparkles, UserRound, ListChecks, PanelsTopLeft } from 'lucide-react'
+import { BookOpenText, Bookmark, ChevronRight, GraduationCap, Highlighter, LogOut, MessageCircle, PenLine, Sparkles, UserRound, ListChecks, PanelsTopLeft } from 'lucide-react'
 
 import { AuthGate } from './components/AuthGate'
 import { Button } from './components/ui/button'
 import { useAuth } from './lib/auth'
 import { ChatPage } from './pages/ChatPage'
+import { CollectionsPage } from './pages/CollectionsPage'
 import { ExamPracticePage } from './pages/ExamPracticePage'
 import { HighlightsPage } from './pages/HighlightsPage'
 import { NotesPage } from './pages/NotesPage'
@@ -16,6 +17,7 @@ const NAV_ITEMS = [
   { to: '/', label: '导师对话', description: '随时提问，深入理解语言', icon: MessageCircle, end: true },
   { to: '/notes', label: '知识库笔记', description: '整理知识，建立语言直觉', icon: BookOpenText, end: false },
   { to: '/highlights', label: '我的高亮', description: '从你的阅读中发现新知', icon: Highlighter, end: false },
+  { to: '/collections', label: '我的收藏', description: '留住好词好句，标出灵感', icon: Bookmark, end: false },
   { to: '/quiz', label: '复习测验', description: '主动回忆，巩固所学', icon: ListChecks, end: false },
   { to: '/practice', label: '专项练习', description: '语法与阅读，真题和仿真分明', icon: PanelsTopLeft, end: false },
   { to: '/writing', label: '写作批改', description: '练习表达，获得反馈', icon: PenLine, end: false },
@@ -96,6 +98,7 @@ function Shell() {
             <Route path="/" element={<ChatPage />} />
             <Route path="/notes" element={<NotesPage />} />
             <Route path="/highlights" element={<HighlightsPage />} />
+            <Route path="/collections" element={<CollectionsPage />} />
             <Route path="/quiz" element={<QuizPage />} />
             <Route path="/practice" element={<ExamPracticePage />} />
             <Route path="/writing" element={<WritingPage />} />

@@ -24,3 +24,12 @@ export interface HighlightRow {
   updated_at?: string
   deleted_at?: string | null
 }
+
+export interface CollectionRow {
+  id: string
+  user_id: string
+  content_text: string
+  content_doc: unknown
+  created_at: string
+  updated_at: string
+}
