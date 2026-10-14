@@ -81,6 +81,13 @@ describe('shared simple editor', () => {
     expect(parseCollectionDoc(onChange.mock.lastCall?.[0])).not.toBeNull()
   })
 
+  it('uses larger, matching type for editor text and its empty placeholder', () => {
+    render(<SimpleEditor {...props} />)
+    const content = screen.getByRole('textbox', { name: '复用文本编辑器' }).parentElement
+    expect(content).toHaveClass('text-lg', 'leading-8')
+    expect(screen.getByText('写一些文字…')).toHaveClass('text-lg', 'leading-8')
+  })
+
   it('visually distinguishes headings, lists, quotes and links in the editing area', () => {
     render(<SimpleEditor {...props} />)
     const content = screen.getByRole('textbox', { name: '复用文本编辑器' }).parentElement

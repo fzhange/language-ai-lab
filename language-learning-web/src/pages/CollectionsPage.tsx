@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { User } from '@supabase/supabase-js'
-import { Bookmark, Plus, Trash2, Pencil, ArrowDown } from 'lucide-react'
+import { Bookmark, Plus, Trash2, Pencil, ArrowDown, ChevronDown } from 'lucide-react'
 import { AlertDialog, Dialog } from 'radix-ui'
 
 import { CollectionEditor } from '../components/CollectionEditor'
@@ -55,6 +55,41 @@ function previewNode(node: CollectionNode, key: number): ReactNode {
 
 function Preview({ doc }: { doc: CollectionDoc }) {
   return <div className="space-y-2 break-words text-base leading-7" aria-label="收藏预览">{doc.content.map(previewNode)}</div>
+}
+
+function CollapsiblePreview({ doc }: { doc: CollectionDoc }) {
+  const id = useId()
+  const previewRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const [expanded, setExpanded] = useState(false)
+  const [canExpand, setCanExpand] = useState(false)
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      if (previewRef.current && !expanded) {
+        setCanExpand(previewRef.current.scrollHeight > previewRef.current.clientHeight + 1)
+      }
+    }
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    if (contentRef.current) observer?.observe(contentRef.current)
+    window.addEventListener('resize', measure)
+    return () => { observer?.disconnect(); window.removeEventListener('resize', measure) }
+  }, [doc, expanded])
+
+  return (
+    <div>
+      <div className="relative">
+        <div id={id} ref={previewRef} className={expanded ? '' : 'max-h-44 overflow-hidden'}>
+          <div ref={contentRef}><Preview doc={doc} /></div>
+        </div>
+        {!expanded && canExpand && <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-card to-transparent" />}
+      </div>
+      {canExpand && <Button type="button" variant="ghost" size="sm" className="mt-2 -ml-2 text-primary" aria-controls={id} aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>
+        <ChevronDown className={expanded ? 'rotate-180' : ''} />{expanded ? '收起' : '显示全部'}
+      </Button>}
+    </div>
+  )
 }
 
 function CollectionsView({ user }: { user: User }) {
@@ -202,7 +237,7 @@ function CollectionsView({ user }: { user: User }) {
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-7 px-4 py-8 pb-24 sm:px-8">
+    <div className="mx-auto w-full max-w-[96rem] space-y-7 px-4 py-8 pb-24 sm:px-6">
       <header className="flex flex-wrap items-center justify-between gap-5">
         <div className="flex items-center gap-4">
           <span className="flex size-12 items-center justify-center rounded-2xl bg-accent text-primary"><Bookmark className="size-6" /></span>
@@ -272,28 +307,30 @@ function CollectionsView({ user }: { user: User }) {
           </div>
         </Card>
       ) : null) : (
-        <div className="grid gap-4 md:grid-cols-2">
+        <ul aria-label="收藏列表" className="flex flex-col gap-5">
           {rows.map((row) => {
             const doc = parseCollectionDoc(row.content_doc)
             return (
-              <Card key={row.id} className="justify-between gap-5 p-5 shadow-sm sm:p-6">
-                {doc ? <Preview doc={doc} /> : <p role="status" className="text-sm text-destructive">内容格式无效，暂时无法预览或编辑。</p>}
-                <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
-                  <time dateTime={row.created_at} className="text-xs text-muted-foreground">{new Date(row.created_at).toLocaleString('zh-CN')}</time>
-                  <div className="flex gap-2">
-                    {doc && <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => startEdit(row)} aria-label="编辑收藏"><Pencil />编辑</Button>}
-                    {confirmId === row.id ? (
-                      <>
-                        <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => setConfirmId(null)}>取消删除</Button>
-                        <Button type="button" size="sm" variant="destructive" disabled={pending} onClick={() => void remove()}>确认删除</Button>
-                      </>
-                    ) : <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={() => { setConfirmId(row.id); setActionError('') }} aria-label="删除收藏"><Trash2 />删除</Button>}
+              <li key={row.id}>
+                <Card className="gap-5 p-5 shadow-sm sm:p-6">
+                  {doc ? <CollapsiblePreview doc={doc} /> : <p role="status" className="text-sm text-destructive">内容格式无效，暂时无法预览或编辑。</p>}
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+                    <time dateTime={row.created_at} className="text-xs text-muted-foreground">{new Date(row.created_at).toLocaleString('zh-CN')}</time>
+                    <div className="flex gap-2">
+                      {doc && <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => startEdit(row)} aria-label="编辑收藏"><Pencil />编辑</Button>}
+                      {confirmId === row.id ? (
+                        <>
+                          <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => setConfirmId(null)}>取消删除</Button>
+                          <Button type="button" size="sm" variant="destructive" disabled={pending} onClick={() => void remove()}>确认删除</Button>
+                        </>
+                      ) : <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={() => { setConfirmId(row.id); setActionError('') }} aria-label="删除收藏"><Trash2 />删除</Button>}
+                    </div>
                   </div>
-                </div>
-              </Card>
+                </Card>
+              </li>
             )
           })}
-        </div>
+        </ul>
       )}
       {hasMore && !loading && <div className="flex justify-center"><Button variant="outline" disabled={loadingMore} onClick={() => void loadMore()}><ArrowDown />{loadingMore ? '加载中…' : '加载更多'}</Button></div>}
     </div>

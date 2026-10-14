@@ -81,7 +81,7 @@ function Shell() {
         </div>
       </nav>
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header className="flex h-16 shrink-0 items-center justify-between border-b bg-card/80 px-5 sm:px-8">
+        <header className="flex h-16 shrink-0 items-center justify-between border-b bg-card/80 px-4 sm:px-6">
           <div className="flex min-w-0 items-center gap-2 text-base">
             <span className="hidden text-muted-foreground sm:inline">学习空间</span>
             <ChevronRight className="hidden size-4 text-muted-foreground/60 sm:inline" />

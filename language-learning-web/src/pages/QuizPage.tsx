@@ -66,7 +66,7 @@ export function QuizPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-6 sm:px-6">
+    <div className="mx-auto w-full max-w-[96rem] space-y-6 px-4 py-6 sm:px-6">
       <header className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <span className="flex size-10 items-center justify-center rounded-xl bg-accent text-primary"><ListChecks className="size-5" /></span>

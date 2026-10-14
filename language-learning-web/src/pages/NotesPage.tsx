@@ -214,12 +214,12 @@ export function NotesPage() {
       >
         <span className="h-10 w-0.5 rounded-full bg-muted-foreground/50 group-hover:bg-primary group-focus-visible:bg-primary" />
       </div>
-      <article className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 sm:p-6">
-        <div className="mx-auto max-w-7xl rounded-xl border bg-card px-5 py-6 shadow-sm sm:px-8 sm:py-10">
+      <article className="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">
+        <div className="mx-auto max-w-[96rem] rounded-xl border bg-card px-5 py-6 shadow-sm sm:px-6 sm:py-10">
           {loadingContent && <p className="text-base text-muted-foreground">加载中…</p>}
           {contentError && <p className="text-base text-destructive">{contentError}</p>}
           {!loadingContent && !contentError && (
-            <div className="prose prose-lg prose-neutral max-w-6xl prose-headings:font-semibold prose-a:text-primary prose-pre:overflow-x-auto">
+            <div className="prose prose-lg prose-neutral mx-auto max-w-6xl prose-headings:font-semibold prose-a:text-primary prose-pre:overflow-x-auto">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
             </div>
           )}

@@ -47,7 +47,7 @@ export function WritingPage() {
   const wordCount = essay.trim() ? essay.trim().split(/\s+/).length : 0
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-6 sm:px-6">
+    <div className="mx-auto w-full max-w-[96rem] space-y-6 px-4 py-6 sm:px-6">
       <header className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <span className="flex size-10 items-center justify-center rounded-xl bg-accent text-primary"><PenLine className="size-5" /></span>

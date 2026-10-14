@@ -6,8 +6,10 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import type { HighlightRow } from '../lib/supabase'
+import { LANGGRAPH_URL, MENTOR_ASSISTANT_ID } from '../lib/config'
 
 const auth = vi.hoisted(() => ({ user: { id: 'reader' } as { id: string } | null, supabaseReady: true }))
+const chatStream = vi.hoisted(() => ({ hook: vi.fn() }))
 const highlights = vi.hoisted(() => ({
   rows: [{ id: 'one', user_id: 'reader', page_url: 'https://example.com', page_title: 'Example',
     exact: 'An important sentence.', color: '#ffddcc', note: 'A note', insight: '', prefix: '', suffix: '' }] as HighlightRow[],
@@ -20,7 +22,7 @@ vi.mock('../lib/auth', () => ({
   useAuth: () => ({ ...auth, accessToken: 'token', loading: false }),
 }))
 vi.mock('@langchain/react', () => ({
-  useStream: () => ({ messages: [], values: {}, isLoading: false }),
+  useStream: (options: unknown) => chatStream.hook(options) ?? { messages: [], values: {}, isLoading: false },
 }))
 vi.mock('../lib/supabase', () => ({
   supabase: {
@@ -60,11 +62,14 @@ afterEach(() => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
   auth.user = { id: 'reader' }
+  auth.supabaseReady = true
   highlights.rows = [{ id: 'one', user_id: 'reader', page_url: 'https://example.com', page_title: 'Example',
     exact: 'An important sentence.', color: '#ffddcc', note: 'A note', insight: '', prefix: '', suffix: '' }]
   highlights.sortColumns.length = 0
+  chatStream.hook.mockReset()
   vi.unstubAllEnvs()
   window.localStorage.clear()
+  window.sessionStorage.clear()
 })
 
 function makeHighlight(id: string, overrides: Partial<HighlightRow> = {}): HighlightRow {
@@ -107,6 +112,214 @@ describe('note selection persistence', () => {
     expect(await screen.findByRole('button', { name: 'one.md' })).toHaveClass('bg-accent')
     expect(await screen.findByRole('heading', { name: 'First note' })).toBeInTheDocument()
     expect(screen.getByTestId('location')).toHaveTextContent('/notes?note=one.md')
+  })
+})
+
+describe('mentor conversation restoration', () => {
+  let nextId = 0
+  function stubMentorStream(loading = false) {
+    if (!loading) nextId = 0
+    chatStream.hook.mockImplementation((options: { threadId?: string | null; onThreadId?: (id: string) => void }) => ({
+      messages: !loading && options.threadId === 'mentor-1'
+        ? [{ id: 'answer-1', type: 'ai', content: 'Your earlier lesson' }]
+        : !loading && options.threadId === 'mentor-2'
+          ? [{ id: 'answer-2', type: 'ai', content: 'Another lesson' }]
+          : [],
+      values: {},
+      isLoading: false,
+      isThreadLoading: loading && options.threadId === 'mentor-1',
+      submit: async () => { if (!options.threadId) options.onThreadId?.(`mentor-${++nextId}`) },
+    }))
+  }
+
+  it('resumes the saved thread and renders its messages after returning to chat', async () => {
+    stubMentorStream()
+    const view = render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    await userEvent.type(screen.getByRole('textbox', { name: '输入问题' }), 'Hello')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+
+    expect(window.localStorage.length).toBe(2)
+    const activeKey = Array.from({ length: window.localStorage.length }, (_, index) => window.localStorage.key(index)!)
+      .find((key) => key.endsWith(':reader'))!
+    expect(window.localStorage.getItem(activeKey)).toBe('mentor-1')
+    expect(window.localStorage.getItem(`${activeKey}:threads`)).toBe('["mentor-1"]')
+
+    view.unmount()
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    expect(screen.getByText('Your earlier lesson')).toBeInTheDocument()
+  })
+
+  it('does not show one account’s conversation after switching accounts', async () => {
+    stubMentorStream()
+    const view = render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    await userEvent.type(screen.getByRole('textbox', { name: '输入问题' }), 'Hello')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    auth.user = { id: 'another-reader' }
+    view.rerender(<MemoryRouter><ChatPage /></MemoryRouter>)
+    expect(screen.queryByText('Your earlier lesson')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '对话 1' })).not.toBeInTheDocument()
+    expect(window.localStorage.length).toBe(2)
+
+    auth.user = { id: 'reader' }
+    view.rerender(<MemoryRouter><ChatPage /></MemoryRouter>)
+    expect(screen.getByText('Your earlier lesson')).toBeInTheDocument()
+  })
+
+  it('restores an unsigned guest chat only within the same browser tab', async () => {
+    auth.user = null
+    auth.supabaseReady = false
+    stubMentorStream()
+    const view = render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    await userEvent.type(screen.getByRole('textbox', { name: '输入问题' }), 'Hello')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    expect(window.localStorage.length).toBe(0)
+    expect(window.sessionStorage.length).toBe(2)
+
+    view.unmount()
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    expect(screen.getByText('Your earlier lesson')).toBeInTheDocument()
+  })
+
+  it('opens an empty conversation and lets the reader return to the previous one', async () => {
+    stubMentorStream()
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    await userEvent.type(screen.getByRole('textbox', { name: '输入问题' }), 'Hello')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    await userEvent.click(screen.getByRole('button', { name: '新对话' }))
+    expect(screen.queryByText('Your earlier lesson')).not.toBeInTheDocument()
+    expect(screen.getByText('好奇，是学习的开始')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '对话 1' }))
+    expect(screen.getByText('Your earlier lesson')).toBeInTheDocument()
+  })
+
+  it('clears an unsent draft when starting a new conversation', async () => {
+    stubMentorStream()
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    await userEvent.type(screen.getByRole('textbox', { name: '输入问题' }), 'Draft question')
+    await userEvent.click(screen.getByRole('button', { name: '新对话' }))
+    expect(screen.getByRole('textbox', { name: '输入问题' })).toHaveValue('')
+  })
+
+  it('clears a highlight prefill when opening a fresh conversation', async () => {
+    stubMentorStream()
+    render(<MemoryRouter initialEntries={[{ pathname: '/', state: { prefill: 'Question from highlight' } }]}><ChatPage /></MemoryRouter>)
+    expect(screen.getByRole('textbox', { name: '输入问题' })).toHaveValue('Question from highlight')
+    await userEvent.click(screen.getByRole('button', { name: '新对话' }))
+    expect(screen.getByRole('textbox', { name: '输入问题' })).toHaveValue('')
+  })
+
+  it('keeps two separate conversations and restores the selected one on return', async () => {
+    stubMentorStream()
+    const view = render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    await userEvent.type(screen.getByRole('textbox', { name: '输入问题' }), 'First')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    await userEvent.click(screen.getByRole('button', { name: '新对话' }))
+    await userEvent.type(screen.getByRole('textbox', { name: '输入问题' }), 'Second')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    expect(screen.getByRole('button', { name: '对话 2' })).toHaveAttribute('aria-current', 'true')
+
+    view.unmount()
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    expect(screen.getByText('Another lesson')).toBeInTheDocument()
+    expect(screen.queryByText('Your earlier lesson')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '对话 1' }))
+    expect(screen.getByText('Your earlier lesson')).toBeInTheDocument()
+    expect(screen.queryByText('Another lesson')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '对话 2' }))
+    expect(screen.getByText('Another lesson')).toBeInTheDocument()
+  })
+
+  it('keeps a new empty conversation selected after returning to chat', async () => {
+    stubMentorStream()
+    const view = render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    await userEvent.type(screen.getByRole('textbox', { name: '输入问题' }), 'First')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    await userEvent.click(screen.getByRole('button', { name: '新对话' }))
+    view.unmount()
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    expect(screen.getByText('好奇，是学习的开始')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '对话 1' })).not.toHaveAttribute('aria-current')
+  })
+
+  function loadTwoThreads() {
+    const key = `mentor-thread:${LANGGRAPH_URL}:${MENTOR_ASSISTANT_ID}:reader`
+    window.localStorage.setItem(key, 'mentor-2')
+    window.localStorage.setItem(`${key}:threads`, '["mentor-1","mentor-2"]')
+    stubMentorStream()
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    return key
+  }
+
+  it('keeps a thread when deletion is cancelled', async () => {
+    const key = loadTwoThreads()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+
+    await userEvent.click(screen.getByRole('button', { name: '删除对话 1' }))
+
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(fetch).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: '对话 1' })).toBeInTheDocument()
+    expect(window.localStorage.getItem(`${key}:threads`)).toBe('["mentor-1","mentor-2"]')
+  })
+
+  it('deletes an inactive conversation from LangGraph and keeps the current one', async () => {
+    const key = loadTwoThreads()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetch = vi.fn().mockResolvedValue({ ok: true })
+    vi.stubGlobal('fetch', fetch)
+
+    await userEvent.click(screen.getByRole('button', { name: '删除对话 1' }))
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: '删除对话 2' })).not.toBeInTheDocument())
+    expect(fetch).toHaveBeenCalledWith(`${LANGGRAPH_URL.replace(/\/$/, '')}/threads/mentor-1`, { method: 'DELETE' })
+    expect(screen.getByText('Another lesson')).toBeInTheDocument()
+    expect(window.localStorage.getItem(key)).toBe('mentor-2')
+    expect(window.localStorage.getItem(`${key}:threads`)).toBe('["mentor-2"]')
+  })
+
+  it('opens an empty chat after deleting the active conversation', async () => {
+    const key = loadTwoThreads()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+
+    await userEvent.click(screen.getByRole('button', { name: '删除对话 2' }))
+
+    expect(await screen.findByText('好奇，是学习的开始')).toBeInTheDocument()
+    expect(screen.queryByText('Another lesson')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '对话 1' })).toBeInTheDocument()
+    expect(window.localStorage.getItem(key)).toBeNull()
+    expect(window.localStorage.getItem(`${key}:threads`)).toBe('["mentor-1"]')
+  })
+
+  it('keeps the conversation and shows an error when LangGraph refuses deletion', async () => {
+    const key = loadTwoThreads()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500 }))
+
+    await userEvent.click(screen.getByRole('button', { name: '删除对话 2' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('删除对话失败')
+    expect(screen.getByText('Another lesson')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '对话 2' })).toBeInTheDocument()
+    expect(window.localStorage.getItem(key)).toBe('mentor-2')
+    expect(window.localStorage.getItem(`${key}:threads`)).toBe('["mentor-1","mentor-2"]')
+  })
+
+  it('prevents sending before a saved conversation finishes loading', async () => {
+    stubMentorStream()
+    const view = render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    await userEvent.type(screen.getByRole('textbox', { name: '输入问题' }), 'Hello')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    view.unmount()
+
+    stubMentorStream(true)
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    expect(screen.getByText('正在加载对话…')).toBeInTheDocument()
+    expect(screen.queryByText('好奇，是学习的开始')).not.toBeInTheDocument()
+    await userEvent.type(screen.getByRole('textbox', { name: '输入问题' }), 'Another question')
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
   })
 })
 
@@ -192,7 +405,7 @@ describe('page readability', () => {
     renderPage(<Page />)
     const heading = await screen.findByRole('heading', { name: title })
     expect(heading).toHaveClass('text-xl')
-    expect(heading.closest('.max-w-7xl')).not.toBeNull()
+    expect(heading.closest('.mx-auto')).toHaveClass('max-w-[96rem]', 'px-4', 'sm:px-6')
   })
 
   it('makes note reading content wider and easier to read', async () => {
@@ -201,14 +414,17 @@ describe('page readability', () => {
       : { ok: true, text: async () => '# A note\n\nAn explanation.' })))
     renderPage(<NotesPage />)
     const article = await screen.findByRole('article')
-    expect(article.firstElementChild).toHaveClass('max-w-7xl')
+    expect(article).toHaveClass('px-4', 'sm:px-6')
+    expect(article.firstElementChild).toHaveClass('max-w-[96rem]', 'sm:px-6')
     await screen.findByText('An explanation.')
-    expect(article.querySelector('.prose-lg')).toHaveClass('max-w-6xl')
+    expect(article.querySelector('.prose-lg')).toHaveClass('mx-auto', 'max-w-6xl')
   })
 
   it('lets practice questions use the page width and enlarges answer text', async () => {
     renderPage(<ExamPracticePage />)
-    expect(screen.getByRole('heading', { name: '选择考试范围' })).toHaveClass('text-xl')
+    const heading = screen.getByRole('heading', { name: '选择考试范围' })
+    expect(heading).toHaveClass('text-xl')
+    expect(heading.closest('.mx-auto')).toHaveClass('max-w-[96rem]', 'px-4', 'sm:px-6')
     expect(screen.getByRole('button', { name: '雅思' }).querySelector('span')).toHaveClass('text-base')
   })
 

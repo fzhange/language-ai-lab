@@ -180,8 +180,8 @@ export function SimpleEditor({ label, initialContent, onChange, textColors, back
         {linkError && <span role="alert" className="w-full text-sm text-destructive">{linkError}</span>}
       </form>}
       <div className="relative flex min-h-0 flex-1 flex-col bg-white">
-        {state?.empty && <span className="pointer-events-none absolute left-5 top-4 text-sm text-slate-400">{placeholder}</span>}
-        <EditorContent editor={editor} className="min-h-0 flex-1 overflow-y-auto text-base leading-7 text-slate-800 [&_h1]:mt-5 [&_h1]:mb-3 [&_h1]:text-3xl [&_h1]:font-bold [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:text-2xl [&_h2]:font-semibold [&_h3]:mt-3 [&_h3]:mb-2 [&_h3]:text-xl [&_h3]:font-semibold [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-primary/50 [&_blockquote]:pl-4 [&_blockquote]:text-slate-600 [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2" />
+        {state?.empty && <span className="pointer-events-none absolute left-5 top-4 text-lg leading-8 text-slate-400">{placeholder}</span>}
+        <EditorContent editor={editor} className="min-h-0 flex-1 overflow-y-auto text-lg leading-8 text-slate-800 [&_h1]:mt-5 [&_h1]:mb-3 [&_h1]:text-3xl [&_h1]:font-bold [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:text-2xl [&_h2]:font-semibold [&_h3]:mt-3 [&_h3]:mb-2 [&_h3]:text-xl [&_h3]:font-semibold [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-primary/50 [&_blockquote]:pl-4 [&_blockquote]:text-slate-600 [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2" />
       </div>
     </div>
   )

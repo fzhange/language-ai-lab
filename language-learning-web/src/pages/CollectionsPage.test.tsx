@@ -35,7 +35,7 @@ const doc = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'tex
 const row: CollectionRow = { id: 'one', user_id: 'reader', content_text: 'Saved text', content_doc: doc, created_at: '2026-01-01T12:00:00Z', updated_at: '2026-01-01T12:00:00Z' }
 
 function view() { return render(<MemoryRouter><CollectionsPage /></MemoryRouter>) }
-afterEach(() => { cleanup(); vi.resetAllMocks(); auth.user = { id: 'reader' }; auth.supabaseReady = true })
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.resetAllMocks(); auth.user = { id: 'reader' }; auth.supabaseReady = true })
 
 describe('my collections', () => {
   it('shows configuration and sign-in states without querying collections', () => {
@@ -61,6 +61,52 @@ describe('my collections', () => {
     await userEvent.click(screen.getByRole('button', { name: '取消' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(screen.getByText('还没有收藏')).toBeInTheDocument()
+  })
+
+  it('uses the wider page area and consistent responsive side gutters', async () => {
+    db.list.mockResolvedValue([row])
+    view()
+    const page = (await screen.findByRole('heading', { name: '我的收藏' })).closest('.mx-auto')
+    expect(page).toHaveClass('max-w-[96rem]', 'px-4', 'sm:px-6')
+  })
+
+  it('places each collection in its own full-width row', async () => {
+    db.list.mockResolvedValue([row, { ...row, id: 'two' }])
+    view()
+    const list = await screen.findByRole('list', { name: '收藏列表' })
+    expect(list).toHaveClass('flex', 'flex-col')
+    expect(list.children).toHaveLength(2)
+    expect(Array.from(list.children).every((item) => item.tagName === 'LI')).toBe(true)
+  })
+
+  it('collapses a long collection and lets readers show all and collapse it again', async () => {
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(320)
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(176)
+    db.list.mockResolvedValue([row])
+    view()
+    const preview = await screen.findByLabelText('收藏预览')
+    const showAll = screen.getByRole('button', { name: '显示全部' })
+    const region = document.getElementById(showAll.getAttribute('aria-controls') ?? '')
+    expect(region).toContainElement(preview)
+    expect(region).toHaveClass('max-h-44', 'overflow-hidden')
+    expect(showAll).toHaveAttribute('aria-expanded', 'false')
+    await userEvent.click(showAll)
+    expect(region).not.toHaveClass('max-h-44')
+    const collapse = screen.getByRole('button', { name: '收起' })
+    expect(collapse).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.click(collapse)
+    expect(region).toHaveClass('max-h-44')
+    expect(screen.getByRole('button', { name: '显示全部' })).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('does not show expansion controls for a short collection', async () => {
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(80)
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(176)
+    db.list.mockResolvedValue([row])
+    view()
+    await screen.findByLabelText('收藏预览')
+    expect(screen.queryByRole('button', { name: '显示全部' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '收起' })).toBeNull()
   })
 
   it('loads a page and reveals the next 50 entries on demand', async () => {
@@ -282,6 +328,7 @@ describe('my collections', () => {
     render(<MemoryRouter initialEntries={['/collections']}><App /></MemoryRouter>)
     expect(screen.getByRole('link', { name: '我的收藏' })).toHaveAttribute('href', '/collections')
     expect(screen.getByRole('link', { name: '我的高亮' })).toHaveAttribute('href', '/highlights')
+    expect(screen.getByRole('main').querySelector(':scope > header')).toHaveClass('px-4', 'sm:px-6')
     expect(await screen.findByRole('heading', { name: '我的收藏' })).toBeInTheDocument()
   })
 })

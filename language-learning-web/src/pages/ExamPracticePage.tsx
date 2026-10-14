@@ -67,7 +67,7 @@ export function ExamPracticePage() {
   const pickLevel = (next: Level) => { setLevel(next); setEmpty(''); setError('') }
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-7 px-4 py-7 pb-24 sm:px-8 lg:px-10">
+    <div className="mx-auto flex w-full max-w-[96rem] flex-col gap-7 px-4 py-7 pb-24 sm:px-6">
       <section className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#2646BD] via-[#365CF2] to-[#6783FF] px-6 py-5 text-white shadow-xl shadow-blue-500/15 sm:px-8 sm:py-6">
         <div className="pointer-events-none absolute -top-24 right-0 size-72 rounded-full border border-white/20 bg-white/10 blur-2xl" />
         <p className="relative mb-2 flex items-center gap-2 text-xs font-semibold tracking-[0.2em] text-blue-100 uppercase"><Sparkles className="size-4" /> LANGUAGE LAB · PRACTICE</p>

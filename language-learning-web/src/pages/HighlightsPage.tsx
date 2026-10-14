@@ -114,7 +114,7 @@ export function HighlightsPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-6 sm:px-6">
+    <div className="mx-auto w-full max-w-[96rem] space-y-6 px-4 py-6 sm:px-6">
       <div className="flex items-center gap-3">
         <span className="flex size-10 items-center justify-center rounded-xl bg-accent text-primary"><Highlighter className="size-5" /></span>
         <div className="flex-1">
