@@ -445,6 +445,74 @@ describe('page readability', () => {
 })
 
 describe('highlight organization', () => {
+  it('keeps the compact header and search on one desktop row with tabs below', async () => {
+    highlights.rows = [makeHighlight('a')]
+    renderPage(<HighlightsPage />)
+    const tools = await screen.findByRole('region', { name: '高亮浏览工具' })
+    const heading = within(tools).getByRole('heading', { name: '我的高亮' })
+    const search = within(tools).getByRole('searchbox', { name: '搜索高亮' })
+    expect(tools).toHaveClass('p-4', 'sm:p-5')
+    const toolbarRow = heading.closest('.lg\\:flex-row')
+    expect(toolbarRow).toContainElement(search)
+    expect(toolbarRow).toHaveClass('flex-col', 'lg:flex-row')
+    expect(within(tools).queryByText('快速查找')).not.toBeInTheDocument()
+    expect(within(tools).getByText('1 条')).toBeInTheDocument()
+    const tabs = within(tools).getByRole('tablist', { name: '高亮查看方式' })
+    expect(tabs).toHaveClass('mt-3', 'grid', 'grid-cols-2', 'sm:grid-cols-4')
+    expect(within(tabs).getAllByRole('tab')).toHaveLength(4)
+  })
+
+  it('searches only highlighted text, ignoring case and surrounding whitespace', async () => {
+    highlights.rows = [
+      makeHighlight('a', { exact: 'MORTALITY', note: 'definition' }),
+      makeHighlight('b', { exact: 'stems', note: 'mortality', page_title: 'mortality journal' }),
+      makeHighlight('c', { exact: 'immortality', page_url: 'https://example.com/mortality' }),
+    ]
+    renderPage(<HighlightsPage />)
+    const search = await screen.findByRole('searchbox', { name: '搜索高亮' })
+    await userEvent.type(search, '  MoRtAlItY  ')
+    const panel = screen.getByRole('tabpanel')
+    expect(within(panel).getAllByRole('listitem')).toHaveLength(2)
+    expect(within(panel).getByText('MORTALITY')).toBeInTheDocument()
+    expect(within(panel).getByText('immortality')).toBeInTheDocument()
+    expect(within(panel).queryByText('stems')).not.toBeInTheDocument()
+    expect(screen.getByText('3 条')).toBeInTheDocument()
+    expect(screen.getByText('找到 2 条')).toBeInTheDocument()
+  })
+
+  it('keeps search active when switching views and counts matching highlights in frequency view', async () => {
+    highlights.rows = [
+      makeHighlight('a', { exact: 'Remember' }),
+      makeHighlight('b', { exact: ' remember ', page_url: 'https://example.com/b' }),
+      makeHighlight('c', { exact: 'Forget', note: 'remember' }),
+    ]
+    renderPage(<HighlightsPage />)
+    const search = await screen.findByRole('searchbox', { name: '搜索高亮' })
+    await userEvent.type(search, 'remember')
+    const user = userEvent.setup()
+    for (const tab of ['按标题', '按时间', '高亮频次']) {
+      await user.click(screen.getByRole('tab', { name: tab }))
+      expect(search).toHaveValue('remember')
+      expect(screen.getByText('找到 2 条')).toBeInTheDocument()
+      expect(within(screen.getByRole('tabpanel')).queryByText('Forget')).not.toBeInTheDocument()
+    }
+    const panel = screen.getByRole('tabpanel')
+    expect(within(panel).getByText('2 次')).toBeInTheDocument()
+    expect(within(panel).getByText('1 条不同的高亮')).toBeInTheDocument()
+  })
+
+  it('shows no-results feedback and lets the reader clear the search', async () => {
+    highlights.rows = [makeHighlight('a', { exact: 'stems' })]
+    renderPage(<HighlightsPage />)
+    const search = await screen.findByRole('searchbox', { name: '搜索高亮' })
+    await userEvent.type(search, 'missing')
+    expect(screen.getByText('找到 0 条')).toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).getByText('没有找到匹配的高亮')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '清空搜索' }))
+    expect(search).toHaveValue('')
+    expect(within(screen.getByRole('tabpanel')).getByText('stems')).toBeInTheDocument()
+  })
+
   it('groups the same title from different URLs while keeping each original source link', async () => {
     highlights.rows = [
       makeHighlight('a'),
