@@ -25,6 +25,10 @@ describe('shared simple editor', () => {
   it('offers only supported text/color actions in a compact toolbar', () => {
     render(<SimpleEditor {...props} />)
     expect(screen.getByRole('toolbar', { name: '文本格式' })).toHaveClass('max-h-[35vh]', 'overflow-y-auto')
+    expect(screen.getByLabelText('常用排版')).toBeInTheDocument()
+    expect(screen.getByLabelText('结构与颜色')).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: '段落样式' })).toContainElement(screen.getByRole('button', { name: '正文' }))
+    expect(screen.getByRole('group', { name: '内容结构' })).toContainElement(screen.getByRole('button', { name: '插入小结区块' }))
     expect(screen.getByRole('button', { name: '撤销' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '重做' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '文字颜色 靛蓝' })).toBeInTheDocument()
@@ -92,6 +96,49 @@ describe('shared simple editor', () => {
     render(<SimpleEditor {...props} />)
     const content = screen.getByRole('textbox', { name: '复用文本编辑器' }).parentElement
     expect(content).toHaveClass('[&_h1]:text-3xl', '[&_ul]:list-disc', '[&_blockquote]:border-l-2', '[&_a]:underline')
+  })
+
+  it('inserts plain and titled section dividers as valid structured nodes', async () => {
+    const onChange = vi.fn()
+    render(<SimpleEditor {...props} initialContent={{ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Before' }] }] }} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: '插入分隔线' }))
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '复用文本编辑器' }).querySelector('hr[data-collection-divider]')).not.toBeNull())
+    expect(parseCollectionDoc(onChange.mock.lastCall?.[0])).not.toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '插入带标题分节' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '分节标题' }), { target: { value: 'Agent architecture' } })
+    fireEvent.click(screen.getByRole('button', { name: '插入分节' }))
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '复用文本编辑器' }).querySelector('[data-collection-section]')).toHaveTextContent('Agent architecture'))
+    expect(parseCollectionDoc(onChange.mock.lastCall?.[0])).not.toBeNull()
+  })
+
+  it('inserts a summary block and changes its stored color', async () => {
+    const onChange = vi.fn()
+    const summary = { type: 'doc', content: [{ type: 'summaryBlock', attrs: { color: 'blue' }, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Weekly understanding' }] }] }] }
+    render(<SimpleEditor {...props} initialContent={summary} onChange={onChange} />)
+    expect(screen.getByRole('group', { name: '小结区块颜色' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '小结区块颜色 玫瑰' }))
+    await waitFor(() => expect(onChange.mock.lastCall?.[0].content[0].attrs.color).toBe('rose'))
+    expect(parseCollectionDoc(onChange.mock.lastCall?.[0])).not.toBeNull()
+    expect(screen.getByRole('textbox', { name: '复用文本编辑器' }).querySelector('aside[data-color="rose"]')).not.toBeNull()
+  })
+
+  it('places the caret inside a newly inserted visible summary block', async () => {
+    const onChange = vi.fn()
+    render(<SimpleEditor {...props} initialContent={{ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Source' }] }] }} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: '插入小结区块' }))
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '复用文本编辑器' }).querySelector('aside[data-collection-summary]')).toHaveTextContent('小结：'))
+    expect(screen.getByRole('group', { name: '小结区块颜色' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '小结区块颜色 蓝色' })).toHaveAttribute('aria-pressed', 'true')
+    expect(parseCollectionDoc(onChange.mock.lastCall?.[0])).not.toBeNull()
+  })
+
+  it('validates a titled section before insertion', () => {
+    render(<SimpleEditor {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: '插入带标题分节' }))
+    fireEvent.click(screen.getByRole('button', { name: '插入分节' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('请输入分节标题')
+    expect(screen.getByRole('textbox', { name: '复用文本编辑器' }).querySelector('[data-collection-section]')).toBeNull()
   })
 
   it('uses an approved color for the Tiptap highlight shortcut', () => {

@@ -96,6 +96,7 @@ function MentorChat({ userId, accessToken, anonymous }: { userId: string | null;
   const [activeId, setActiveId] = useState(saved.active)
   const [current, setCurrent] = useState(() => ({ id: saved.active, key: saved.active ?? 'draft:0', ignorePrefill: false }))
   const draftNumber = useRef(0)
+  const recoveryNumber = useRef(0)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState('')
 
@@ -133,6 +134,11 @@ function MentorChat({ userId, accessToken, anonymous }: { userId: string | null;
     setActiveId(null)
     setCurrent({ id: null, key: `draft:${draftNumber.current}`, ignorePrefill: true })
     saveActive(null)
+  }
+
+  const recoverThread = (id: string) => {
+    recoveryNumber.current += 1
+    setCurrent({ id, key: `${id}:recovered:${recoveryNumber.current}`, ignorePrefill: true })
   }
 
   const deleteThread = async (id: string, number: number) => {
@@ -185,14 +191,15 @@ function MentorChat({ userId, accessToken, anonymous }: { userId: string | null;
           )).reverse()}
         </div>
       </aside>
-      <MentorThread key={current.key} threadId={current.id} onThreadId={onThreadId} userId={userId} accessToken={accessToken} ignorePrefill={current.ignorePrefill} />
+      <MentorThread key={current.key} threadId={current.id} onThreadId={onThreadId} onRecoverThread={recoverThread} userId={userId} accessToken={accessToken} ignorePrefill={current.ignorePrefill} />
     </div>
   )
 }
 
-function MentorThread({ threadId, onThreadId, userId, accessToken, ignorePrefill }: {
+function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessToken, ignorePrefill }: {
   threadId: string | null
   onThreadId: (id: string) => void
+  onRecoverThread: (id: string) => void
   userId: string | null
   accessToken: string | null
   ignorePrefill: boolean
@@ -208,11 +215,13 @@ function MentorThread({ threadId, onThreadId, userId, accessToken, ignorePrefill
   const [image, setImage] = useState<string | null>(null)
   const [imageLoading, setImageLoading] = useState(false)
   const [imageError, setImageError] = useState('')
+  const [recovering, setRecovering] = useState(false)
   const [sending, setSending] = useState(false)
   const [lastSentImage, setLastSentImage] = useState(false)
   const imageInputRef = useRef<HTMLInputElement>(null)
   const imageSelection = useRef(0)
   const cancelled = useRef(false)
+  const recoveryAttempt = useRef(0)
   const bottomRef = useRef<HTMLDivElement>(null)
   const pendingInterrupts = stream.interrupts ?? []
   const hasPendingApproval = pendingInterrupts.length > 0
@@ -226,6 +235,51 @@ function MentorThread({ threadId, onThreadId, userId, accessToken, ignorePrefill
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [stream.messages.length])
+
+  useEffect(() => () => { recoveryAttempt.current += 1 }, [])
+
+  const recoverCompletedImageRun = async (knownMessageIds: Set<string>) => {
+    const currentThreadId = stream.threadId
+    if (!currentThreadId) {
+      setImageError('导师回复未能完成。图片和问题已保留，请重试。')
+      return false
+    }
+    const attempt = ++recoveryAttempt.current
+    setRecovering(true)
+    setImageError('连接暂时中断，正在同步导师已完成的回复…')
+
+    for (let retry = 0; retry < 20; retry += 1) {
+      if (retry > 0) await new Promise((resolve) => window.setTimeout(resolve, 1000))
+      if (recoveryAttempt.current !== attempt) return true
+      try {
+        const state = await stream.client.threads.getState<{ messages?: { id?: string; type?: string; content?: unknown }[] }>(currentThreadId)
+        const messages = state.values?.messages
+        const hasNewReply = Array.isArray(messages) && messages.some((message) =>
+          message.type === 'ai'
+          && typeof message.id === 'string'
+          && !knownMessageIds.has(message.id)
+          && textOf(message.content).trim().length > 0,
+        )
+        if (hasNewReply) {
+          setImageError('')
+          setRecovering(false)
+          setInput('')
+          setImage(null)
+          if (imageInputRef.current) imageInputRef.current.value = ''
+          onRecoverThread(currentThreadId)
+          return true
+        }
+      } catch {
+        // A temporary state-read failure is expected while the stream reconnects.
+      }
+    }
+
+    if (recoveryAttempt.current === attempt) {
+      setRecovering(false)
+      setImageError('导师回复未能完成。图片和问题已保留，请重试。')
+    }
+    return false
+  }
 
   const selectImage = (file?: File) => {
     if (!file) return
@@ -276,8 +330,10 @@ function MentorThread({ threadId, onThreadId, userId, accessToken, ignorePrefill
     ] : text
     cancelled.current = false
     setSending(true)
+    setRecovering(false)
     setImageError('')
     setLastSentImage(Boolean(image))
+    const knownMessageIds = new Set(stream.messages.map((message) => message.id).filter((id): id is string => typeof id === 'string'))
     let runFailed = false
     // user_id / supabase_token 经 config.configurable 传给服务端工具
     //（服务端不采信对话文本里的身份；token 用于 RLS 授权读 whw_highlights）
@@ -289,7 +345,8 @@ function MentorThread({ threadId, onThreadId, userId, accessToken, ignorePrefill
         },
         onError: () => {
           runFailed = true
-          setImageError(image ? '图片发送失败，请确认导师模型支持图片后重试。' : '发送失败，请重试。')
+          if (image) void recoverCompletedImageRun(knownMessageIds)
+          else setImageError('发送失败，请重试。')
         },
       },
     ).then(() => {
@@ -299,7 +356,8 @@ function MentorThread({ threadId, onThreadId, userId, accessToken, ignorePrefill
       setImage(null)
       if (imageInputRef.current) imageInputRef.current.value = ''
     }).catch(() => {
-      setImageError(image ? '图片发送失败，请确认导师模型支持图片后重试。' : '发送失败，请重试。')
+      if (image) void recoverCompletedImageRun(knownMessageIds)
+      else setImageError('发送失败，请重试。')
     }).finally(() => setSending(false))
   }
 
@@ -414,9 +472,9 @@ function MentorThread({ threadId, onThreadId, userId, accessToken, ignorePrefill
             config: { configurable: { user_id: userId ?? undefined, supabase_token: accessToken ?? undefined } },
           })} />
         {stream.isLoading && <p className="flex items-center gap-2 text-xs text-muted-foreground"><span className="size-2 animate-pulse rounded-full bg-primary" />导师思考中…</p>}
-        {stream.error != null && (
+        {stream.error != null && !recovering && (
           <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            {lastSentImage ? '图片发送失败，请确认导师模型支持图片后重试。' : `连接出错，请确认服务已在 ${LANGGRAPH_URL} 启动。`}
+            {lastSentImage ? '导师回复未能完成。图片和问题已保留，请重试。' : `连接出错，请确认服务已在 ${LANGGRAPH_URL} 启动。`}
           </p>
         )}
         <div ref={bottomRef} />
@@ -457,7 +515,7 @@ function MentorThread({ threadId, onThreadId, userId, accessToken, ignorePrefill
             <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />正在处理图片…
           </div>
         )}
-        {imageError && <p role="alert" className="text-xs text-destructive">{imageError}</p>}
+        {imageError && <p role={recovering ? 'status' : 'alert'} className={`text-xs ${recovering ? 'text-amber-700' : 'text-destructive'}`}>{imageError}</p>}
         <div className="flex items-end gap-2">
           <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp" aria-label="选择图片"
             disabled={sending || stream.isLoading} className="sr-only" onChange={(e: ChangeEvent<HTMLInputElement>) => selectImage(e.target.files?.[0])} />

@@ -1,5 +1,7 @@
 export const COLLECTION_TEXT_COLORS = ['#243042', '#476996', '#9b596e', '#477864', '#1e293b', '#2563eb', '#be123c', '#15803d'] as const
 export const COLLECTION_HIGHLIGHT_COLORS = ['#fff3d6', '#e8eefb', '#f9e9ee', '#e9f3eb', '#fef08a', '#bfdbfe', '#fecdd3', '#bbf7d0'] as const
+export const COLLECTION_SUMMARY_COLORS = ['blue', 'green', 'yellow', 'rose'] as const
+export type CollectionSummaryColor = typeof COLLECTION_SUMMARY_COLORS[number]
 
 export type CollectionMark =
   | { type: 'textStyle' | 'highlight'; attrs: { color: string } }
@@ -7,10 +9,10 @@ export type CollectionMark =
   | { type: 'link'; attrs: { href: string; target?: '_blank' | null; rel?: string | null; class?: null; title?: null } }
 
 export interface CollectionNode {
-  type: 'text' | 'paragraph' | 'heading' | 'bulletList' | 'orderedList' | 'listItem' | 'blockquote'
+  type: 'text' | 'paragraph' | 'heading' | 'bulletList' | 'orderedList' | 'listItem' | 'blockquote' | 'horizontalRule' | 'sectionDivider' | 'summaryBlock'
   text?: string
   marks?: CollectionMark[]
-  attrs?: { level?: number; textAlign?: 'left' | 'center' | 'right' | null; start?: number; type?: null }
+  attrs?: { level?: number; textAlign?: 'left' | 'center' | 'right' | null; start?: number; type?: null; title?: string; color?: CollectionSummaryColor }
   content?: CollectionNode[]
 }
 
@@ -79,11 +81,12 @@ export function parseCollectionDoc(value: unknown): CollectionDoc | null {
     weight += 80
     if (weight > MAX_DOCUMENT_WEIGHT) return null
     const kind = entry.type
-    const allowed = parent === 'doc' ? ['paragraph', 'heading', 'bulletList', 'orderedList', 'blockquote']
+    const allowed = parent === 'doc' ? ['paragraph', 'heading', 'bulletList', 'orderedList', 'blockquote', 'horizontalRule', 'sectionDivider', 'summaryBlock']
       : parent === 'paragraph' || parent === 'heading' ? ['text']
         : parent === 'bulletList' || parent === 'orderedList' ? ['listItem']
           : parent === 'listItem' ? ['paragraph', 'heading', 'blockquote', 'bulletList', 'orderedList']
-            : parent === 'blockquote' ? ['paragraph', 'heading', 'blockquote', 'bulletList', 'orderedList'] : []
+            : parent === 'blockquote' ? ['paragraph', 'heading', 'blockquote', 'bulletList', 'orderedList']
+              : parent === 'summaryBlock' ? ['paragraph'] : []
     if (!allowed.includes(kind)) return null
     if (kind === 'text') {
       if (!keysAre(entry, ['type', 'text', 'marks']) || typeof entry.text !== 'string' ||
@@ -100,6 +103,28 @@ export function parseCollectionDoc(value: unknown): CollectionDoc | null {
         marks.push(parsed)
       }
       return { type: 'text', text: entry.text, ...(marks.length ? { marks } : {}) }
+    }
+    if (kind === 'horizontalRule') {
+      return keysAre(entry, ['type']) ? { type: 'horizontalRule' } : null
+    }
+    if (kind === 'sectionDivider') {
+      if (!keysAre(entry, ['type', 'attrs']) || !isObject(entry.attrs) || !keysAre(entry.attrs, ['title']) ||
+        typeof entry.attrs.title !== 'string' || !entry.attrs.title.trim() || entry.attrs.title.length > 120) return null
+      characters += entry.attrs.title.length
+      weight += entry.attrs.title.length
+      if (characters > MAX_TEXT_LENGTH || weight > MAX_DOCUMENT_WEIGHT) return null
+      return { type: 'sectionDivider', attrs: { title: entry.attrs.title } }
+    }
+    if (kind === 'summaryBlock') {
+      if (!keysAre(entry, ['type', 'attrs', 'content']) || !isObject(entry.attrs) || !keysAre(entry.attrs, ['color']) ||
+        !COLLECTION_SUMMARY_COLORS.includes(entry.attrs.color as CollectionSummaryColor) || !Array.isArray(entry.content) || !entry.content.length) return null
+      const children: CollectionNode[] = []
+      for (const child of entry.content) {
+        const parsed = parseNode(child, kind, depth + 1)
+        if (!parsed) return null
+        children.push(parsed)
+      }
+      return { type: 'summaryBlock', attrs: { color: entry.attrs.color as CollectionSummaryColor }, content: children }
     }
     if (!keysAre(entry, ['type', 'attrs', 'content']) ||
       (entry.content !== undefined && !Array.isArray(entry.content)) ||
@@ -148,6 +173,8 @@ export function parseCollectionDoc(value: unknown): CollectionDoc | null {
 export function collectionPlainText(doc: CollectionDoc): string {
   function lines(node: CollectionNode): string[] {
     if (node.type === 'paragraph' || node.type === 'heading') return [(node.content ?? []).map((child) => child.text ?? '').join('')]
+    if (node.type === 'horizontalRule') return []
+    if (node.type === 'sectionDivider') return [node.attrs?.title ?? '']
     return (node.content ?? []).flatMap(lines)
   }
   return doc.content.flatMap(lines).join('\n')

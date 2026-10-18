@@ -2,10 +2,10 @@ import { SimpleEditor } from './ui/simple-editor'
 import { COLLECTION_HIGHLIGHT_COLORS, COLLECTION_TEXT_COLORS, collectionPlainText, parseCollectionDoc, type CollectionDoc } from '../lib/collection-document'
 
 const textColors = [
-  { name: '深色', color: COLLECTION_TEXT_COLORS[0] },
-  { name: '蓝色', color: COLLECTION_TEXT_COLORS[1] },
-  { name: '玫瑰', color: COLLECTION_TEXT_COLORS[2] },
-  { name: '绿松', color: COLLECTION_TEXT_COLORS[3] },
+  { name: '墨色', color: COLLECTION_TEXT_COLORS[4] },
+  { name: '蓝色', color: COLLECTION_TEXT_COLORS[5] },
+  { name: '莓红', color: COLLECTION_TEXT_COLORS[6] },
+  { name: '绿色', color: COLLECTION_TEXT_COLORS[7] },
 ]
 const backgroundColors = [
   { name: '黄色', color: COLLECTION_HIGHLIGHT_COLORS[0] },

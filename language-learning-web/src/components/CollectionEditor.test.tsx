@@ -68,6 +68,21 @@ describe('collection editor', () => {
     expect(screen.getByRole('textbox', { name: '收藏内容' })).toHaveClass('min-h-full')
   })
 
+  it('uses clean swatches for the current writing palette', () => {
+    render(<CollectionEditor initialDoc={null} onChange={vi.fn()} />)
+    const expected = [
+      ['文字颜色 墨色', '#1e293b'],
+      ['文字颜色 蓝色', '#2563eb'],
+      ['文字颜色 莓红', '#be123c'],
+      ['文字颜色 绿色', '#15803d'],
+    ] as const
+    for (const [name, color] of expected) {
+      const button = screen.getByRole('button', { name })
+      expect(button).not.toHaveTextContent('A')
+      expect(button.querySelector('span')).toHaveStyle({ backgroundColor: color })
+    }
+  })
+
   it('loads stored selected-word formatting and exposes accessible palette controls', () => {
     const colored: CollectionDoc = { type: 'doc', content: [{ type: 'paragraph', content: [
       { type: 'text', text: 'Select ', marks: [{ type: 'textStyle', attrs: { color: '#2563eb' } }] },

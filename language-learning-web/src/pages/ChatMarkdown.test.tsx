@@ -9,6 +9,8 @@ import { LANGGRAPH_URL } from '../lib/config'
 const chat = vi.hoisted(() => ({
   interrupts: [] as { id: string; value: unknown }[],
   messages: [] as { id: string; type: string; name?: string; content: string | { type: string; text?: string; image_url?: { url: string } }[] }[],
+  threadId: null as string | null,
+  client: { threads: { getState: vi.fn() } },
   respondAll: vi.fn(), submit: vi.fn(), stop: vi.fn(),
 }))
 vi.mock('../lib/auth', () => ({ useAuth: () => ({ user: { id: 'reader' }, accessToken: 'token', supabaseReady: true }) }))
@@ -35,6 +37,8 @@ afterEach(() => {
   chat.respondAll.mockReset()
   chat.submit.mockReset()
   chat.stop.mockReset()
+  chat.client.threads.getState.mockReset()
+  chat.threadId = null
   chat.interrupts = []
   chat.messages = []
   window.localStorage.clear()
@@ -209,7 +213,7 @@ describe('Mentor image messages', () => {
     await userEvent.upload(screen.getByLabelText('选择图片'), png())
     await userEvent.type(screen.getByRole('textbox', { name: '输入问题' }), 'Help')
     await userEvent.click(screen.getByRole('button', { name: '发送' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('图片发送失败')
+    expect(await screen.findByRole('alert')).toHaveTextContent('导师回复未能完成')
     expect(screen.getByRole('img', { name: '待发送图片' })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '输入问题' })).toHaveValue('Help')
   })
@@ -220,9 +224,31 @@ describe('Mentor image messages', () => {
     await userEvent.upload(screen.getByLabelText('选择图片'), png())
     await userEvent.type(screen.getByRole('textbox', { name: '输入问题' }), 'Help')
     await userEvent.click(screen.getByRole('button', { name: '发送' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('图片发送失败')
+    expect(await screen.findByRole('alert')).toHaveTextContent('导师回复未能完成')
     expect(screen.getByRole('img', { name: '待发送图片' })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '输入问题' })).toHaveValue('Help')
+  })
+
+  it('recovers a completed image reply when only the browser stream fails', async () => {
+    let finishState!: (value: { values: { messages: typeof chat.messages } }) => void
+    chat.threadId = 'thread-1'
+    chat.client.threads.getState.mockImplementation(() => new Promise((resolve) => { finishState = resolve }))
+    chat.submit.mockImplementation(async (_input, options) => { options.onError?.(new Error('stream disconnected')) })
+    renderChat()
+    await userEvent.upload(screen.getByLabelText('选择图片'), png())
+    await userEvent.type(screen.getByRole('textbox', { name: '输入问题' }), 'Explain probabilistic')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('正在同步导师已完成的回复')
+
+    chat.messages = [
+      { id: 'human-1', type: 'human', content: 'Explain probabilistic' },
+      { id: 'ai-1', type: 'ai', content: 'Probabilistic means based on likelihood, not certainty.' },
+    ]
+    finishState({ values: { messages: chat.messages } })
+
+    expect(await screen.findByText(/based on likelihood/)).toBeInTheDocument()
+    expect(screen.queryByText(/导师回复未能完成/)).toBeNull()
+    expect(screen.queryByRole('img', { name: '待发送图片' })).toBeNull()
   })
 })
 

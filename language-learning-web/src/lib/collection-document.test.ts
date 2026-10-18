@@ -104,6 +104,32 @@ describe('collection document', () => {
     expect(collectionPlainText(doc!)).toBe('Chapter\nSee reference\nFirst\nChild\n\nQuote')
   })
 
+  it('keeps dividers, titled sections and colored summary blocks as structured content', () => {
+    const structured = { type: 'doc', content: [
+      { type: 'paragraph', content: [{ type: 'text', text: 'Source material' }] },
+      { type: 'horizontalRule' },
+      { type: 'sectionDivider', attrs: { title: 'Agent architecture' } },
+      { type: 'summaryBlock', attrs: { color: 'green' }, content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'The service exposes thread capabilities.' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'Keep identity in runtime config.' }] },
+      ] },
+    ] }
+    const doc = parseCollectionDoc(structured)
+    expect(doc).toEqual(structured)
+    expect(collectionPlainText(doc!)).toBe('Source material\nAgent architecture\nThe service exposes thread capabilities.\nKeep identity in runtime config.')
+  })
+
+  it('rejects unsafe collection block attributes and nesting', () => {
+    const paragraph = { type: 'paragraph', content: [{ type: 'text', text: 'Summary' }] }
+    for (const node of [
+      { type: 'horizontalRule', attrs: { onclick: 'bad' } },
+      { type: 'sectionDivider', attrs: { title: '' } },
+      { type: 'sectionDivider', attrs: { title: 'x'.repeat(121) } },
+      { type: 'summaryBlock', attrs: { color: 'black' }, content: [paragraph] },
+      { type: 'summaryBlock', attrs: { color: 'blue' }, content: [{ type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'bad' }] }] },
+    ]) expect(parseCollectionDoc({ type: 'doc', content: [node] })).toBeNull()
+  })
+
   it('accepts a heading after the first paragraph inside a list item', () => {
     const rich = { type: 'doc', content: [{ type: 'bulletList', content: [{ type: 'listItem', content: [
       { type: 'paragraph', content: [{ type: 'text', text: 'A' }] },
