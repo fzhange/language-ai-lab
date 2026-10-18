@@ -55,8 +55,59 @@ uv run langgraph dev
 Then open LangGraph Studio at https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024
 (or the URL printed by the dev server).
 
-Checkpointer/store are injected by the LangGraph server: in-memory locally,
-Postgres in production — no extra wiring in `agent.py`.
+Checkpointer/store are injected by LangGraph Server using the PostgreSQL factories
+in `core/pg_persistence.py` — no graph-level persistence wiring in `agent.py`.
+
+Configure `LANGGRAPH_PG_HOST`, `LANGGRAPH_PG_PORT` (default `5432`),
+`LANGGRAPH_PG_DATABASE`, `LANGGRAPH_PG_USER`, and `LANGGRAPH_PG_PASSWORD` in the
+ignored `.env`. Remote connections require TLS (`LANGGRAPH_PG_SSLMODE=require`
+by default; use `verify-full` plus `LANGGRAPH_PG_SSLROOTCERT` when a trusted CA is
+available). `LANGGRAPH_PG_HOSTADDR` is an optional operator-selected fallback IP.
+Tables are isolated in `LANGGRAPH_PG_SCHEMA` (default `language_ai_lab`). Initialize
+that schema once with `uv run python -m core.pg_persistence`, then run
+`uv run langgraph dev`. Startup opens pools but does not run database migrations.
+
+This remains a **local development server**: graph checkpoints and Store data go
+to PostgreSQL, while native thread/run records stay under `.langgraph_api`.
+Existing local checkpoints are not migrated automatically; back up that directory
+and use new conversations after switching. Do not expose this local API publicly.
+`supabase_token` and other request credentials are removed from PG checkpoint
+metadata, but the development server can still persist run configuration locally.
+
+The mentor loads `/memories/AGENTS.md` through a verified-user memory middleware.
+`save_learning_memory` saves explicitly requested learning preferences as separate,
+idempotent Store items; this virtual memory source is not a local Markdown file.
+The same verified user can access it across threads; other users cannot via these
+tools. Native `/store` API authorization still requires a production auth gateway.
+Memory loading is read-only; saving is restricted to the dedicated tool, not a
+writable `FilesystemBackend`. Approved Markdown artifacts are written to a private
+SeaweedFS S3 bucket instead of local disk; preview and download continue through
+the authenticated `/artifacts/{id}/download` route.
+
+Configure the following **server-only** environment variables (for example in the
+ignored `.env`), using your existing bucket-scoped credentials:
+
+```text
+SEAWEEDFS_S3_ENDPOINT_URL=https://fordpzhang-any2.devcloud.woa.com:8333
+SEAWEEDFS_S3_BUCKET=documents
+SEAWEEDFS_S3_ACCESS_KEY_ID=<your access key>
+SEAWEEDFS_S3_SECRET_ACCESS_KEY=<your secret key>
+SEAWEEDFS_S3_CA_BUNDLE=/absolute/path/to/server.crt
+```
+
+`SEAWEEDFS_S3_CA_BUNDLE` must be the actual certificate file path accessible to
+this Python process (not a `~/` shortcut); the client uses `us-east-1`, path-style
+addressing, and Signature V4. The S3 URL does not include `/admin` or the bucket.
+Do not put S3 credentials in the frontend. If SeaweedFS is unavailable or the
+configuration is missing, creating/downloading a Markdown artifact fails; there is
+no local fallback. Old `artifacts/` files are not migrated and old download links
+will not resolve after the switch. The IP alternative is not selected automatically
+because its hostname may not match the TLS certificate.
+
+Deleting threads removes their PG checkpoints, not user memory. Rollback deletes
+checkpoints/writes associated with the rolled-back run; unused blobs may remain
+until thread deletion. `keep_latest` pruning of DeepAgents delta message channels
+is not supported by the upstream saver; no automatic pruning is configured.
 
 ## Model
 

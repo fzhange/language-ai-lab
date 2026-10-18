@@ -30,7 +30,7 @@
 ## 开发约定
 
 1. **新增 Assistant 的步骤**：在 `assistants/` 建自包含包（`agent.py` 工厂 + `prompts/` + `tools/`）→ 在 `langgraph.json` 注册 graph id。工厂可以是 async（如需 await 加载 MCP 工具）。
-2. **checkpointer/store 由 LangGraph Server 注入**，业务代码不接线。
+2. **checkpointer/store 由 LangGraph Server 注入**，业务 graph 不接线。`langgraph.json` 通过 `core/pg_persistence.py` 工厂使用 PG；连接凭证仅在 `.env`，表位于独立 `language_ai_lab` schema。初始化用 `uv run python -m core.pg_persistence`。本地 dev 的 thread/run 管理记录仍存 `.langgraph_api`，旧会话不会自动迁移。
 3. **模型**：`core/model.py` 的 `get_chat_model()`，默认 `openai:gpt-5.6-terra`（OpenAI 兼容代理），必须 `use_responses_api=False`；`CHAT_MODEL` env 可切换。
 4. **安全红线**：web server 场景禁用可写的 `FilesystemBackend` / `LocalShellBackend`（见 `backends_demo.py` 注释）；读本地文件用自定义只读 tool + 相对路径校验；密钥仅 env。
 5. **MCP**：token 等配置采用惰性读取模式——在图谱工厂/工具函数内读 env，避免 import 期失败。
