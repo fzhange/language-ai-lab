@@ -16,9 +16,11 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from assistants.language_mentor.tools.knowledge import _iter_notes, _root
 from exam_http import router as exam_router
+from markdown_http import router as markdown_router
 
 app = FastAPI(title="nature-of-language notes API", docs_url=None, redoc_url=None)
 app.include_router(exam_router)
+app.include_router(markdown_router)
 
 
 @app.middleware("http")

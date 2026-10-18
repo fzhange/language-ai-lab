@@ -1,11 +1,14 @@
 /** 导师对话页：useStream 直连 LangGraph Server 的 language-mentor 图谱（SSE 流式）。 */
 
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useStream } from '@langchain/react'
-import { ArrowUp, CircleStop, MessageCircle, Plus, Sparkles, Trash2 } from 'lucide-react'
+import { Dialog } from 'radix-ui'
+import { ArrowUp, CircleStop, ImagePlus, LoaderCircle, MessageCircle, Plus, Sparkles, Trash2, X } from 'lucide-react'
 
 import { MarkdownView } from '../components/MarkdownView'
+import { MarkdownApproval } from '../components/MarkdownApproval'
+import { MarkdownArtifact } from '../components/MarkdownArtifact'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { Card } from '../components/ui/card'
@@ -22,6 +25,16 @@ function textOf(content: unknown): string {
       .join('')
   }
   return String(content ?? '')
+}
+
+const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
+const MAX_IMAGE_SIZE = 2 * 1024 * 1024
+
+function imageOf(content: unknown): string | null {
+  if (!Array.isArray(content)) return null
+  const part = content.find((item) => item?.type === 'image_url') as { image_url?: { url?: unknown } } | undefined
+  const url = part?.image_url?.url
+  return typeof url === 'string' && /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(url) ? url : null
 }
 
 interface TodoItem {
@@ -192,7 +205,17 @@ function MentorThread({ threadId, onThreadId, userId, accessToken, ignorePrefill
     onThreadId,
   })
   const [input, setInput] = useState('')
+  const [image, setImage] = useState<string | null>(null)
+  const [imageLoading, setImageLoading] = useState(false)
+  const [imageError, setImageError] = useState('')
+  const [sending, setSending] = useState(false)
+  const [lastSentImage, setLastSentImage] = useState(false)
+  const imageInputRef = useRef<HTMLInputElement>(null)
+  const imageSelection = useRef(0)
+  const cancelled = useRef(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const pendingInterrupts = stream.interrupts ?? []
+  const hasPendingApproval = pendingInterrupts.length > 0
 
   // 从「我的高亮」跳转过来时预填问题
   useEffect(() => {
@@ -204,11 +227,58 @@ function MentorThread({ threadId, onThreadId, userId, accessToken, ignorePrefill
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [stream.messages.length])
 
+  const selectImage = (file?: File) => {
+    if (!file) return
+    const selection = ++imageSelection.current
+    setImage(null)
+    setImageLoading(false)
+    setImageError('')
+    if (!IMAGE_TYPES.has(file.type)) {
+      setImageError('仅支持 PNG、JPEG 或 WebP 图片。')
+      return
+    }
+    if (file.size > MAX_IMAGE_SIZE) {
+      setImageError('图片不能超过 2 MB。')
+      return
+    }
+    setImageLoading(true)
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (imageSelection.current !== selection) return
+      setImageLoading(false)
+      if (typeof reader.result === 'string') setImage(reader.result)
+      else setImageError('图片读取失败，请重试。')
+    }
+    reader.onerror = () => {
+      if (imageSelection.current !== selection) return
+      setImageLoading(false)
+      setImageError('图片读取失败，请重试。')
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const pasteImage = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const file = Array.from(e.clipboardData.files).find((item) => item.type.startsWith('image/'))
+      ?? Array.from(e.clipboardData.items).find((item) => item.kind === 'file' && item.type.startsWith('image/'))?.getAsFile()
+    if (file) {
+      e.preventDefault()
+      selectImage(file)
+    }
+  }
+
   const send = (e: FormEvent) => {
     e.preventDefault()
-    const content = input.trim()
-    if (!content || stream.isLoading || stream.isThreadLoading) return
-    setInput('')
+    const text = input.trim()
+    if ((!text && !image) || imageLoading || stream.isLoading || stream.isThreadLoading || hasPendingApproval || sending) return
+    const content = image ? [
+      { type: 'text', text: text || '请讲解这张图片中的英语内容。' },
+      { type: 'image_url', image_url: { url: image } },
+    ] : text
+    cancelled.current = false
+    setSending(true)
+    setImageError('')
+    setLastSentImage(Boolean(image))
+    let runFailed = false
     // user_id / supabase_token 经 config.configurable 传给服务端工具
     //（服务端不采信对话文本里的身份；token 用于 RLS 授权读 whw_highlights）
     void stream.submit(
@@ -217,8 +287,20 @@ function MentorThread({ threadId, onThreadId, userId, accessToken, ignorePrefill
         config: {
           configurable: { user_id: userId ?? undefined, supabase_token: accessToken ?? undefined },
         },
+        onError: () => {
+          runFailed = true
+          setImageError(image ? '图片发送失败，请确认导师模型支持图片后重试。' : '发送失败，请重试。')
+        },
       },
-    )
+    ).then(() => {
+      if (runFailed || cancelled.current) return
+      setInput('')
+      ++imageSelection.current
+      setImage(null)
+      if (imageInputRef.current) imageInputRef.current.value = ''
+    }).catch(() => {
+      setImageError(image ? '图片发送失败，请确认导师模型支持图片后重试。' : '发送失败，请重试。')
+    }).finally(() => setSending(false))
   }
 
   // human / ai / tool 全部展示：tool 消息就是"思考过程"（检索了哪篇笔记、读到了什么）
@@ -240,7 +322,7 @@ function MentorThread({ threadId, onThreadId, userId, accessToken, ignorePrefill
 
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto py-2">
         {stream.isThreadLoading && <p role="status" className="text-sm text-muted-foreground">正在加载对话…</p>}
-        {!stream.isThreadLoading && visibleMessages.length === 0 && (
+        {!stream.isThreadLoading && !hasPendingApproval && visibleMessages.length === 0 && (
           <Card className="mx-auto mt-8 max-w-lg items-center gap-3 border-primary/10 bg-card px-6 py-10 text-center shadow-sm sm:mt-16">
             <span className="flex size-12 items-center justify-center rounded-2xl bg-accent text-primary"><Sparkles className="size-6" /></span>
             <h3 className="text-xl font-semibold">好奇，是学习的开始</h3>
@@ -262,6 +344,9 @@ function MentorThread({ threadId, onThreadId, userId, accessToken, ignorePrefill
           // 工具返回：可折叠的"过程记录"，默认收起，点开看检索/读取到的内容
           if (msg.type === 'tool') {
             const name = (msg as { name?: string }).name ?? 'tool'
+            if (name === 'create_markdown' && text.includes('"markdown_artifact"')) {
+              return <MarkdownArtifact key={msg.id ?? i} result={text} accessToken={accessToken} />
+            }
             return (
               <details key={msg.id ?? i} className="group mx-2 text-xs sm:mx-8">
                 <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
@@ -276,6 +361,7 @@ function MentorThread({ threadId, onThreadId, userId, accessToken, ignorePrefill
           }
 
           const isHuman = msg.type === 'human'
+          const messageImage = isHuman ? imageOf(msg.content) : null
           const toolCalls = (msg as { tool_calls?: { name?: string; args?: unknown }[] })
             .tool_calls
 
@@ -293,7 +379,7 @@ function MentorThread({ threadId, onThreadId, userId, accessToken, ignorePrefill
           }
 
           // 彻底空的消息不渲染
-          if (!text.trim() && !(toolCalls && toolCalls.length > 0)) return null
+          if (!text.trim() && !messageImage && !(toolCalls && toolCalls.length > 0)) return null
 
           return (
             <div key={msg.id ?? i} className={`flex ${isHuman ? 'justify-end' : 'justify-start'}`}>
@@ -312,7 +398,10 @@ function MentorThread({ threadId, onThreadId, userId, accessToken, ignorePrefill
                   </div>
                 )}
                 {isHuman ? (
-                  <p className="whitespace-pre-wrap">{text}</p>
+                  <div className="space-y-2">
+                    {messageImage && <img src={messageImage} alt="已发送图片" className="max-h-60 max-w-full rounded-lg object-contain" />}
+                    {text && <p className="whitespace-pre-wrap">{text}</p>}
+                  </div>
                 ) : (
                   <MarkdownView>{text}</MarkdownView>
                 )}
@@ -320,39 +409,89 @@ function MentorThread({ threadId, onThreadId, userId, accessToken, ignorePrefill
             </div>
           )
         })}
+        <MarkdownApproval interrupts={pendingInterrupts} disabled={stream.isLoading || stream.isThreadLoading}
+          onRespond={(responses) => stream.respondAll(responses, {
+            config: { configurable: { user_id: userId ?? undefined, supabase_token: accessToken ?? undefined } },
+          })} />
         {stream.isLoading && <p className="flex items-center gap-2 text-xs text-muted-foreground"><span className="size-2 animate-pulse rounded-full bg-primary" />导师思考中…</p>}
         {stream.error != null && (
-          <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            连接出错：{String(stream.error)}（请确认 generic-agent-service 已在 {LANGGRAPH_URL} 启动）
+          <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            {lastSentImage ? '图片发送失败，请确认导师模型支持图片后重试。' : `连接出错，请确认服务已在 ${LANGGRAPH_URL} 启动。`}
           </p>
         )}
         <div ref={bottomRef} />
       </div>
 
-      <form onSubmit={send} className="flex shrink-0 items-end gap-2 rounded-xl border bg-card p-3 shadow-sm">
-        <Textarea
-          aria-label="输入问题"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault()
-              e.currentTarget.form?.requestSubmit()
-            }
-          }}
-          rows={2}
-          placeholder="输入你的问题…（Enter 发送，Shift + Enter 换行）"
-          className="max-h-40 min-w-0 flex-1 resize-y border-0 bg-transparent shadow-none focus-visible:border-transparent focus-visible:ring-0"
-        />
-        {stream.isLoading ? (
-          <Button variant="outline" type="button" onClick={() => void stream.stop()} className="mb-1">
-            <CircleStop />停止
-          </Button>
-        ) : (
-          <Button type="submit" disabled={!input.trim() || stream.isThreadLoading} className="mb-1">
-            <ArrowUp />发送
-          </Button>
+      <form onSubmit={send} className="shrink-0 space-y-2 rounded-xl border bg-card p-3 shadow-sm">
+        {image && (
+          <Dialog.Root>
+            <div className="relative w-fit">
+              <Dialog.Trigger asChild>
+                <button type="button" aria-label="放大图片" className="block cursor-zoom-in rounded-lg focus-visible:outline-2 focus-visible:outline-primary">
+                  <img src={image} alt="待发送图片" className="max-h-28 max-w-36 rounded-lg border object-contain" />
+                </button>
+              </Dialog.Trigger>
+              <Button type="button" variant="secondary" size="icon" aria-label="移除图片" disabled={sending || stream.isLoading}
+                onClick={() => { ++imageSelection.current; setImage(null); if (imageInputRef.current) imageInputRef.current.value = '' }}
+                className="absolute -right-2 -top-2 size-7 rounded-full shadow-sm">
+                <X className="size-4" />
+              </Button>
+            </div>
+            <Dialog.Portal>
+              <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-[2px]" />
+              <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[95dvh] w-[92vw] max-w-5xl -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2 rounded-2xl bg-card p-3 shadow-2xl sm:p-5">
+                <div className="flex w-full items-center justify-between gap-3">
+                  <Dialog.Title className="text-sm font-medium">图片预览</Dialog.Title>
+                  <Dialog.Close asChild>
+                    <Button type="button" variant="ghost" size="icon" aria-label="关闭图片预览"><X /></Button>
+                  </Dialog.Close>
+                </div>
+                <Dialog.Description className="sr-only">待发送图片的大图预览。</Dialog.Description>
+                <img src={image} alt="放大的待发送图片" className="max-h-[85dvh] max-w-full rounded-lg object-contain" />
+              </Dialog.Content>
+            </Dialog.Portal>
+          </Dialog.Root>
         )}
+        {imageLoading && (
+          <div role="status" className="flex h-20 w-fit min-w-36 items-center justify-center gap-2 rounded-lg border bg-accent/40 px-3 text-xs text-muted-foreground">
+            <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />正在处理图片…
+          </div>
+        )}
+        {imageError && <p role="alert" className="text-xs text-destructive">{imageError}</p>}
+        <div className="flex items-end gap-2">
+          <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp" aria-label="选择图片"
+            disabled={sending || stream.isLoading} className="sr-only" onChange={(e: ChangeEvent<HTMLInputElement>) => selectImage(e.target.files?.[0])} />
+          <Button type="button" variant="ghost" size="icon" aria-label="添加图片" title="添加图片（也可粘贴截图）"
+            disabled={sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval}
+            onClick={() => imageInputRef.current?.click()} className="mb-1 shrink-0">
+            <ImagePlus className="size-5" />
+          </Button>
+          <Textarea
+            aria-label="输入问题"
+            disabled={sending || stream.isLoading}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onPaste={pasteImage}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault()
+                e.currentTarget.form?.requestSubmit()
+              }
+            }}
+            rows={2}
+            placeholder="输入你的问题或粘贴截图…（Enter 发送，Shift + Enter 换行）"
+            className="max-h-40 min-w-0 flex-1 resize-y border-0 bg-transparent shadow-none focus-visible:border-transparent focus-visible:ring-0"
+          />
+          {stream.isLoading || sending ? (
+            <Button variant="outline" type="button" onClick={() => { cancelled.current = true; void stream.stop() }} className="mb-1">
+              <CircleStop />停止
+            </Button>
+          ) : (
+            <Button type="submit" disabled={(!input.trim() && !image) || imageLoading || sending || stream.isThreadLoading || hasPendingApproval} className="mb-1">
+              <ArrowUp />发送
+            </Button>
+          )}
+        </div>
       </form>
     </div>
   )

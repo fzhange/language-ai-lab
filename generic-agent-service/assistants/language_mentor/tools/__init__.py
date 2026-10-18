@@ -2,8 +2,9 @@
 
 from assistants.language_mentor.tools.highlights import HIGHLIGHT_TOOLS
 from assistants.language_mentor.tools.knowledge import KNOWLEDGE_TOOLS
+from assistants.language_mentor.tools.markdown import create_markdown
 
-LOCAL_TOOLS: list = [*KNOWLEDGE_TOOLS, *HIGHLIGHT_TOOLS]
+LOCAL_TOOLS: list = [*KNOWLEDGE_TOOLS, *HIGHLIGHT_TOOLS, create_markdown]
 MCP_SERVERS: dict = {}
 
 __all__ = ["LOCAL_TOOLS", "MCP_SERVERS"]
