@@ -256,16 +256,16 @@ export function HighlightsPage() {
             <ul className="divide-y">
               {items.map((item) => (
                 <li key={item.id} className="space-y-3 px-5 py-5">
-                  <p className="break-words text-lg leading-8 text-foreground">
-                    <mark style={{ backgroundColor: item.color }} className="rounded px-0.5">
-                      {item.exact}
-                    </mark>
-                  </p>
-                  {activeTab !== 'url' && (
-                    <a href={item.page_url} target="_blank" rel="noreferrer" aria-label={`来源：${item.page_title || item.page_url}`} className="inline-flex max-w-full items-center gap-1 text-sm text-primary hover:underline">
-                      <span className="truncate">{activeTab === 'title' ? item.page_url : item.page_title || item.page_url}</span><ArrowUpRight className="size-4 shrink-0" />
+                  <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                    <p className="min-w-0 flex-1 break-words text-lg leading-8 text-foreground">
+                      <mark style={{ backgroundColor: item.color }} className="rounded px-0.5">
+                        {item.exact}
+                      </mark>
+                    </p>
+                    <a href={item.page_url} target="_blank" rel="noreferrer" title={item.page_url} aria-label={`来源：${item.page_title || item.page_url}`} className="inline-flex min-w-0 max-w-full items-center gap-1 self-start text-sm text-primary hover:underline sm:ml-auto sm:max-w-[40%] sm:shrink-0">
+                      <span className="truncate">{activeTab === 'url' ? '打开原网页' : activeTab === 'title' ? item.page_url : item.page_title || item.page_url}</span><ArrowUpRight className="size-4 shrink-0" />
                     </a>
-                  )}
+                  </div>
                   {item.note && (
                     <div className="text-base leading-relaxed text-foreground">
                       <span className="font-medium">笔记：</span><MarkdownView compact>{item.note}</MarkdownView>
