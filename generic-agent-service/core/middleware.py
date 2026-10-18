@@ -9,9 +9,11 @@ name 字段弄丢（id/args 完好），ToolNode 因此报 "is not a valid tool"
 """
 
 import logging
+from dataclasses import replace
 from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware.types import ModelResponse
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
 
@@ -37,12 +39,8 @@ class RepairToolCallsMiddleware(AgentMiddleware):
         keys = set(args)
         candidates = []
         for name, tool in self._tools.items():
-            schema = getattr(tool, "args_schema", None)
-            if schema is None:
-                if not keys:
-                    candidates.append(name)
-                continue
-            js = schema.model_json_schema()
+            schema = tool.tool_call_schema
+            js = schema if isinstance(schema, dict) else schema.model_json_schema()
             props = set(js.get("properties", {}))
             required = set(js.get("required", []))
             if required <= keys <= props:
@@ -53,6 +51,21 @@ class RepairToolCallsMiddleware(AgentMiddleware):
             if favored in candidates:
                 return favored
         return None
+
+    def _repair_response(self, response: ModelResponse) -> ModelResponse:
+        messages = []
+        changed = False
+        for message in response.result:
+            update = self.after_model({"messages": [message]}, None)
+            messages.append(update["messages"][0] if update else message)
+            changed = changed or update is not None
+        return replace(response, result=messages) if changed else response
+
+    def wrap_model_call(self, request: Any, handler: Any) -> ModelResponse:
+        return self._repair_response(handler(request))
+
+    async def awrap_model_call(self, request: Any, handler: Any) -> ModelResponse:
+        return self._repair_response(await handler(request))
 
     def after_model(self, state: dict[str, Any], runtime: Any) -> dict[str, Any] | None:
         messages = state.get("messages") or []
