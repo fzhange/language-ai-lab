@@ -534,6 +534,48 @@ describe('highlight organization', () => {
     expect(within(panel).getByText('https://example.com/b')).toBeInTheDocument()
   })
 
+  it('keeps the URL group header and links each highlight from its top-right corner', async () => {
+    highlights.rows = [
+      makeHighlight('a', { exact: 'First phrase' }),
+      makeHighlight('b', { exact: 'Second phrase' }),
+    ]
+    renderPage(<HighlightsPage />)
+    const panel = await screen.findByRole('tabpanel')
+    const heading = within(panel).getByRole('heading', { name: 'Shared title' })
+    expect(within(heading).getByRole('link')).toHaveAttribute('href', 'https://example.com/a')
+    expect(within(panel).getByText('https://example.com/a')).toBeInTheDocument()
+    for (const phrase of ['First phrase', 'Second phrase']) {
+      const item = within(panel).getByText(phrase).closest('li')!
+      const source = within(item).getByRole('link', { name: /来源/ })
+      expect(source).toHaveAttribute('href', 'https://example.com/a')
+      expect(source).toHaveTextContent('打开原网页')
+      expect(source).toHaveAttribute('title', 'https://example.com/a')
+      expect(within(item).getByText(phrase).closest('p')?.parentElement).toContainElement(source)
+      expect(source).toHaveClass('sm:ml-auto')
+    }
+  })
+
+  it('places each source link beside its highlight on desktop and below it on narrow screens', async () => {
+    highlights.rows = [makeHighlight('a', {
+      exact: 'Saved phrase', note: 'Reading note',
+      page_url: 'https://example.com/a/very/long/source/path',
+    })]
+    renderPage(<HighlightsPage />)
+    const user = userEvent.setup()
+    for (const tab of ['按标题', '按时间']) {
+      await user.click(await screen.findByRole('tab', { name: tab }))
+      const item = within(screen.getByRole('tabpanel')).getByRole('listitem')
+      const phrase = within(item).getByText('Saved phrase')
+      const source = within(item).getByRole('link', { name: /来源/ })
+      expect(source).toHaveAttribute('href', 'https://example.com/a/very/long/source/path')
+      expect(source).toHaveAttribute('title', 'https://example.com/a/very/long/source/path')
+      expect(phrase.closest('p')?.parentElement).toContainElement(source)
+      expect(phrase.closest('p')?.parentElement).toHaveClass('flex-col', 'sm:flex-row')
+      expect(source.querySelector('span')).toHaveClass('truncate')
+      expect(within(item).getByText('Reading note')).toBeInTheDocument()
+    }
+  })
+
   it('groups highlights by their local calendar day, including missing dates', async () => {
     highlights.rows = [
       makeHighlight('a'),

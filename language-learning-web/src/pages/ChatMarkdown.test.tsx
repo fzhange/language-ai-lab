@@ -1,0 +1,392 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import '@testing-library/jest-dom/vitest'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
+import { LANGGRAPH_URL } from '../lib/config'
+
+const chat = vi.hoisted(() => ({
+  interrupts: [] as { id: string; value: unknown }[],
+  messages: [] as { id: string; type: string; name?: string; content: string | { type: string; text?: string; image_url?: { url: string } }[] }[],
+  respondAll: vi.fn(), submit: vi.fn(), stop: vi.fn(),
+}))
+vi.mock('../lib/auth', () => ({ useAuth: () => ({ user: { id: 'reader' }, accessToken: 'token', supabaseReady: true }) }))
+vi.mock('@langchain/react', () => ({ useStream: () => ({ ...chat, values: {}, isLoading: false, isThreadLoading: false }) }))
+
+import { ChatPage } from './ChatPage'
+
+beforeEach(() => { chat.submit.mockResolvedValue(undefined) })
+
+function openApproval(count = 1) {
+  chat.interrupts = [{ id: 'approval-1', value: {
+    action_requests: Array.from({ length: count }, (_, index) => ({ name: 'create_markdown', args: {
+      filename: `lesson-${index}.md`, content: '# Lesson\n\nExplain the present perfect.',
+    } })),
+    review_configs: [{ action_name: 'create_markdown', allowed_decisions: ['approve', 'reject'] }],
+  } }]
+  return render(<MemoryRouter><ChatPage /></MemoryRouter>)
+}
+
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+  chat.respondAll.mockReset()
+  chat.submit.mockReset()
+  chat.stop.mockReset()
+  chat.interrupts = []
+  chat.messages = []
+  window.localStorage.clear()
+})
+
+Element.prototype.scrollIntoView = vi.fn()
+
+describe('Mentor image messages', () => {
+  const png = () => new File(['image bytes'], 'notes.png', { type: 'image/png' })
+  const renderChat = () => render(<MemoryRouter><ChatPage /></MemoryRouter>)
+
+  it('sends text and one selected image to the mentor as multimodal content', async () => {
+    renderChat()
+    await userEvent.upload(screen.getByLabelText('选择图片'), png())
+    expect(await screen.findByRole('img', { name: '待发送图片' })).toBeInTheDocument()
+    await userEvent.type(screen.getByRole('textbox', { name: '输入问题' }), 'Explain this sentence')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(chat.submit).toHaveBeenCalledOnce())
+    expect(chat.submit).toHaveBeenCalledWith({ messages: [{ type: 'human', content: [
+      { type: 'text', text: 'Explain this sentence' },
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,aW1hZ2UgYnl0ZXM=' } },
+    ] }] }, { config: { configurable: { user_id: 'reader', supabase_token: 'token' } }, onError: expect.any(Function) })
+    expect(screen.queryByRole('img', { name: '待发送图片' })).not.toBeInTheDocument()
+  })
+
+  it('sends an image without typed text and shows the image when restoring a thread', async () => {
+    chat.messages = [{ id: 'user-image', type: 'human', content: [
+      { type: 'text', text: 'Explain the English in this image' },
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,aW1hZ2UgYnl0ZXM=' } },
+    ] }]
+    renderChat()
+    expect(screen.getByRole('img', { name: '已发送图片' })).toHaveAttribute('src', 'data:image/png;base64,aW1hZ2UgYnl0ZXM=')
+    await userEvent.upload(screen.getByLabelText('选择图片'), png())
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(chat.submit).toHaveBeenCalledOnce())
+    expect(chat.submit.mock.calls[0][0].messages[0].content[0]).toEqual({ type: 'text', text: '请讲解这张图片中的英语内容。' })
+  })
+
+  it('rejects unsupported or oversized images before submitting', async () => {
+    renderChat()
+    await userEvent.upload(screen.getByLabelText('选择图片'), new File(['x'], 'notes.svg', { type: 'image/svg+xml' }), { applyAccept: false })
+    expect(screen.getByRole('alert')).toHaveTextContent('PNG、JPEG 或 WebP')
+    await userEvent.upload(screen.getByLabelText('选择图片'), new File([new Uint8Array(2 * 1024 * 1024 + 1)], 'big.png', { type: 'image/png' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('2 MB')
+    expect(chat.submit).not.toHaveBeenCalled()
+  })
+
+  it('accepts a pasted screenshot supplied as a clipboard item', async () => {
+    renderChat()
+    fireEvent.paste(screen.getByRole('textbox', { name: '输入问题' }), {
+      clipboardData: { files: [], items: [{ kind: 'file', type: 'image/png', getAsFile: png }] },
+    })
+    expect(await screen.findByRole('img', { name: '待发送图片' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '发送' })).toBeEnabled()
+  })
+
+  it('shows a processing indicator while a pasted image is being read and blocks sending until ready', async () => {
+    const readers: { onload: (() => void) | null; result: string; readAsDataURL: () => void }[] = []
+    class DeferredReader {
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      result = 'data:image/png;base64,aW1hZ2UgYnl0ZXM='
+      readAsDataURL() { readers.push(this) }
+    }
+    vi.stubGlobal('FileReader', DeferredReader)
+    renderChat()
+    await userEvent.type(screen.getByRole('textbox', { name: '输入问题' }), 'Help')
+    fireEvent.paste(screen.getByRole('textbox', { name: '输入问题' }), {
+      clipboardData: { files: [], items: [{ kind: 'file', type: 'image/png', getAsFile: png }] },
+    })
+    expect(screen.getByRole('status')).toHaveTextContent('正在处理图片')
+    expect(screen.queryByRole('img', { name: '待发送图片' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
+    fireEvent.submit(screen.getByRole('textbox', { name: '输入问题' }).closest('form')!)
+    expect(chat.submit).not.toHaveBeenCalled()
+    act(() => { readers[0].onload?.() })
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(screen.getByRole('img', { name: '待发送图片' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '发送' })).toBeEnabled()
+  })
+
+  it('clears the processing indicator and reports image read failure', async () => {
+    const readers: { onerror: (() => void) | null; readAsDataURL: () => void }[] = []
+    class FailingReader {
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      readAsDataURL() { readers.push(this) }
+    }
+    vi.stubGlobal('FileReader', FailingReader)
+    renderChat()
+    await userEvent.upload(screen.getByLabelText('选择图片'), png())
+    expect(screen.getByRole('status')).toHaveTextContent('正在处理图片')
+    act(() => { readers[0].onerror?.() })
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('图片读取失败')
+    expect(chat.submit).not.toHaveBeenCalled()
+  })
+
+  it('does not keep an older image when a replacement image is invalid', async () => {
+    renderChat()
+    await userEvent.upload(screen.getByLabelText('选择图片'), png())
+    expect(await screen.findByRole('img', { name: '待发送图片' })).toBeInTheDocument()
+    await userEvent.upload(screen.getByLabelText('选择图片'), new File(['x'], 'bad.svg', { type: 'image/svg+xml' }), { applyAccept: false })
+    expect(screen.getByRole('alert')).toHaveTextContent('PNG、JPEG 或 WebP')
+    expect(screen.queryByRole('img', { name: '待发送图片' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
+  })
+
+  it('does not attach an image after the user replaces it before the read completes', async () => {
+    const readers: { onload: (() => void) | null; result: string | null; readAsDataURL: () => void }[] = []
+    class DeferredReader {
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      result: string | null = 'data:image/png;base64,aW1hZ2UgYnl0ZXM='
+      readAsDataURL() { readers.push(this) }
+    }
+    vi.stubGlobal('FileReader', DeferredReader)
+    renderChat()
+    await userEvent.upload(screen.getByLabelText('选择图片'), png())
+    await userEvent.upload(screen.getByLabelText('选择图片'), new File(['x'], 'bad.svg', { type: 'image/svg+xml' }), { applyAccept: false })
+    act(() => { readers[0].onload?.() })
+    expect(screen.queryByRole('img', { name: '待发送图片' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
+  })
+
+  it('opens a larger preview on thumbnail click and closes it without removing the attachment', async () => {
+    renderChat()
+    await userEvent.upload(screen.getByLabelText('选择图片'), png())
+    await userEvent.click(screen.getByRole('button', { name: '放大图片' }))
+    const preview = screen.getByRole('dialog', { name: '图片预览' })
+    expect(preview).toBeInTheDocument()
+    expect(preview.querySelector('img')).toHaveAttribute('src', 'data:image/png;base64,aW1hZ2UgYnl0ZXM=')
+    expect(preview.querySelector('img')).toHaveClass('max-h-[85dvh]')
+    expect(chat.submit).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: '关闭图片预览' }))
+    expect(screen.queryByRole('dialog', { name: '图片预览' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '放大图片' })).toHaveFocus()
+    expect(screen.getByRole('img', { name: '待发送图片' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '放大图片' }))
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog', { name: '图片预览' })).not.toBeInTheDocument()
+    expect(screen.getByRole('img', { name: '待发送图片' })).toBeInTheDocument()
+  })
+
+  it('can remove a selected image before sending', async () => {
+    renderChat()
+    await userEvent.upload(screen.getByLabelText('选择图片'), png())
+    expect(await screen.findByRole('img', { name: '待发送图片' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '移除图片' }))
+    expect(screen.queryByRole('img', { name: '待发送图片' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
+  })
+
+  it('keeps the draft when a running submission is stopped', async () => {
+    let finish!: () => void
+    chat.submit.mockImplementation(() => new Promise<void>((resolve) => { finish = resolve }))
+    renderChat()
+    await userEvent.upload(screen.getByLabelText('选择图片'), png())
+    await userEvent.type(screen.getByRole('textbox', { name: '输入问题' }), 'Help')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    expect(screen.getByRole('textbox', { name: '输入问题' })).toBeDisabled()
+    await userEvent.click(screen.getByRole('button', { name: '停止' }))
+    finish()
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '输入问题' })).toBeEnabled())
+    expect(screen.getByRole('img', { name: '待发送图片' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '输入问题' })).toHaveValue('Help')
+  })
+
+  it('keeps the draft when the stream reports a failed model run without rejecting submit', async () => {
+    chat.submit.mockImplementation(async (_input, options) => { options.onError?.(new Error('vision unsupported')) })
+    renderChat()
+    await userEvent.upload(screen.getByLabelText('选择图片'), png())
+    await userEvent.type(screen.getByRole('textbox', { name: '输入问题' }), 'Help')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('图片发送失败')
+    expect(screen.getByRole('img', { name: '待发送图片' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '输入问题' })).toHaveValue('Help')
+  })
+
+  it('keeps the image and question available when an image submission fails', async () => {
+    chat.submit.mockRejectedValue(new Error('unsupported image'))
+    renderChat()
+    await userEvent.upload(screen.getByLabelText('选择图片'), png())
+    await userEvent.type(screen.getByRole('textbox', { name: '输入问题' }), 'Help')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('图片发送失败')
+    expect(screen.getByRole('img', { name: '待发送图片' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '输入问题' })).toHaveValue('Help')
+  })
+})
+
+describe('Markdown approval', () => {
+  it('previews the requested document and blocks ordinary submit until reviewed', async () => {
+    openApproval()
+    expect(screen.getByText('lesson-0.md')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Lesson' })).toBeInTheDocument()
+    await userEvent.type(screen.getByRole('textbox', { name: '输入问题' }), 'Hello')
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
+    fireEvent.submit(screen.getByRole('textbox', { name: '输入问题' }).closest('form')!)
+    expect(chat.submit).not.toHaveBeenCalled()
+  })
+
+  it('approves every action in order using the pending interrupt and current identity', async () => {
+    openApproval(2)
+    chat.respondAll.mockResolvedValue(undefined)
+    await userEvent.click(screen.getByRole('button', { name: '批准创建' }))
+    expect(chat.respondAll).toHaveBeenCalledWith({ 'approval-1': { decisions: [{ type: 'approve' }, { type: 'approve' }] } }, {
+      config: { configurable: { user_id: 'reader', supabase_token: 'token' } },
+    })
+  })
+
+  it('sends explicit rejection feedback instead of executing or creating a new run', async () => {
+    openApproval()
+    chat.respondAll.mockResolvedValue(undefined)
+    await userEvent.click(screen.getByRole('button', { name: '拒绝' }))
+    const decision = chat.respondAll.mock.calls[0][0]['approval-1'].decisions[0]
+    expect(decision.type).toBe('reject')
+    expect(decision.message).toContain('不要重试')
+    expect(chat.submit).not.toHaveBeenCalled()
+  })
+
+  it('can reject a malformed tool proposal without approving it', async () => {
+    chat.interrupts = [{ id: 'malformed', value: {
+      action_requests: [{ name: 'create_markdown', args: { filename: 'lesson.md' } }],
+    } }]
+    chat.respondAll.mockResolvedValue(undefined)
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    expect(screen.getByRole('button', { name: '批准创建' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '拒绝' })).toBeEnabled()
+    await userEvent.click(screen.getByRole('button', { name: '拒绝' }))
+    expect(chat.respondAll.mock.calls[0][0].malformed.decisions[0].type).toBe('reject')
+  })
+
+  it('keeps approval controls usable after a failed resume', async () => {
+    openApproval()
+    chat.respondAll.mockRejectedValue(new Error('offline'))
+    await userEvent.click(screen.getByRole('button', { name: '批准创建' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('审批提交失败')
+    expect(screen.getByRole('button', { name: '批准创建' })).toBeEnabled()
+  })
+
+  it('disables duplicate approval submissions while a response is pending', async () => {
+    openApproval()
+    let finish!: () => void
+    chat.respondAll.mockImplementation(() => new Promise<void>((resolve) => { finish = resolve }))
+    await userEvent.click(screen.getByRole('button', { name: '批准创建' }))
+    expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled()
+    finish()
+    await waitFor(() => expect(screen.getByRole('button', { name: '拒绝' })).toBeEnabled())
+  })
+
+  it('restores the pending approval when returning to a saved thread', () => {
+    const view = openApproval()
+    view.unmount()
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    expect(screen.getByRole('button', { name: '批准创建' })).toBeInTheDocument()
+  })
+})
+
+describe('Markdown preview', () => {
+  function renderDocument() {
+    chat.messages = [{ id: 'result', type: 'tool', name: 'create_markdown', content: JSON.stringify({
+      type: 'markdown_artifact', artifact_id: 'a'.repeat(64), filename: 'lesson.md',
+    }) }]
+    return render(<MemoryRouter><ChatPage /></MemoryRouter>)
+  }
+
+  it('opens the saved document in a read-only dialog from its filename and closes with Escape', async () => {
+    const fetch = vi.fn().mockResolvedValue({ ok: true, text: async () => '# Present perfect\n\n**Completed** actions.' })
+    vi.stubGlobal('fetch', fetch)
+    renderDocument()
+    await userEvent.click(screen.getByRole('button', { name: '预览 lesson.md' }))
+    const dialog = await screen.findByRole('dialog', { name: 'lesson.md' })
+    expect(dialog).toHaveClass('w-[85vw]')
+    expect(dialog).not.toHaveClass('max-w-5xl')
+    expect(dialog).toHaveTextContent('Completed actions.')
+    expect(screen.getByRole('heading', { name: 'Present perfect' })).toBeInTheDocument()
+    expect(dialog.querySelector('textarea')).toBeNull()
+    expect(fetch).toHaveBeenCalledWith(`${LANGGRAPH_URL.replace(/\/$/, '')}/artifacts/${'a'.repeat(64)}/download`, {
+      headers: { Authorization: 'Bearer token' }, signal: expect.any(AbortSignal),
+    })
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '预览 lesson.md' })).toHaveFocus()
+  })
+
+  it('shows loading immediately, allows closing, and aborts the pending preview request', async () => {
+    let signal: AbortSignal | undefined
+    vi.stubGlobal('fetch', vi.fn((_url, options) => {
+      signal = options.signal
+      return new Promise(() => {})
+    }))
+    renderDocument()
+    await userEvent.click(screen.getByRole('button', { name: '预览' }))
+    expect(screen.getByRole('dialog')).toHaveTextContent('正在加载文档…')
+    await userEvent.click(screen.getByRole('button', { name: '关闭预览' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(signal?.aborted).toBe(true)
+  })
+
+  it('shows a failed preview and lets the reader retry without regenerating the document', async () => {
+    const fetch = vi.fn().mockResolvedValueOnce({ ok: false }).mockResolvedValueOnce({ ok: true, text: async () => '# Saved lesson' })
+    vi.stubGlobal('fetch', fetch)
+    renderDocument()
+    await userEvent.click(screen.getByRole('button', { name: '预览' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('预览加载失败')
+    await userEvent.click(screen.getByRole('button', { name: '重新加载' }))
+    expect(await screen.findByRole('heading', { name: 'Saved lesson' })).toBeInTheDocument()
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(chat.submit).not.toHaveBeenCalled()
+  })
+
+  it('renders raw HTML as text instead of creating executable preview content', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, text: async () => '<script>alert(1)</script>\n\n# Safe title' }))
+    renderDocument()
+    await userEvent.click(screen.getByRole('button', { name: '预览' }))
+    expect(await screen.findByRole('heading', { name: 'Safe title' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog').querySelector('script')).toBeNull()
+  })
+})
+
+describe('Markdown download', () => {
+  it('downloads the approved artifact with the user token as a Markdown attachment', async () => {
+    const id = 'a'.repeat(64)
+    chat.messages = [{ id: 'result', type: 'tool', name: 'create_markdown', content: JSON.stringify({
+      type: 'markdown_artifact', artifact_id: id, filename: 'lesson.md', download_path: `/artifacts/${id}/download`,
+    }) }]
+    const fetch = vi.fn().mockResolvedValue({ ok: true, blob: async () => new Blob(['# Lesson']) })
+    vi.stubGlobal('fetch', fetch)
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:test') })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
+    let downloadedFilename: string | undefined
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      downloadedFilename = this.download
+    })
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '下载 lesson.md' }))
+    expect(fetch).toHaveBeenCalledWith(`${LANGGRAPH_URL.replace(/\/$/, '')}/artifacts/${id}/download`, {
+      headers: { Authorization: 'Bearer token' },
+    })
+    expect(click).toHaveBeenCalledOnce()
+    expect(downloadedFilename).toBe('lesson.md')
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:test')
+  })
+
+  it('shows a download error without pretending the file was retrieved', async () => {
+    chat.messages = [{ id: 'result', type: 'tool', name: 'create_markdown', content: JSON.stringify({
+      type: 'markdown_artifact', artifact_id: 'a'.repeat(64), filename: 'lesson.md',
+    }) }]
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }))
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '下载 lesson.md' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('下载失败')
+  })
+})
