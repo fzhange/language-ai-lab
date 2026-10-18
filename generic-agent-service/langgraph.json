@@ -12,5 +12,12 @@
   "http": {
     "app": "./notes_http.py:app"
   },
+  "checkpointer": {
+    "backend": "custom",
+    "path": "./core/pg_persistence.py:create_checkpointer"
+  },
+  "store": {
+    "path": "./core/pg_persistence.py:create_store"
+  },
   "env": ".env"
 }

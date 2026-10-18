@@ -11,6 +11,7 @@ evals/harbor-jobs/
 
 # Runtime output of backends_demo.py (FilesystemBackend/LocalShellBackend root_dir).
 workspace/
+artifacts/
 
 # Dependencies.
 node_modules/
