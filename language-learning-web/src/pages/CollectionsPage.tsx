@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { Bookmark, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Inbox, Pencil, Plus, Trash2 } from 'lucide-react'
-import { AlertDialog, Dialog, Popover } from 'radix-ui'
+import { Dialog, Popover } from 'radix-ui'
 
 import { CollectionEditor } from '../components/CollectionEditor'
 import { Button } from '../components/ui/button'
@@ -66,7 +66,10 @@ function previewNode(node: CollectionNode, key: number): ReactNode {
 }
 
 function Preview({ doc }: { doc: CollectionDoc }) {
-  return <div className="space-y-2 break-words text-base leading-7" aria-label="收藏预览">{doc.content.map(previewNode)}</div>
+  // 旧内容可能含有连续多个空段落（如从别处粘贴时每个空行都变成独立段落），只保留一个空段落的间距，避免预览出现异常大的空白。
+  const isEmptyParagraph = (node: CollectionNode) => node.type === 'paragraph' && !node.content?.length
+  const collapsed = doc.content.filter((node, index) => !(isEmptyParagraph(node) && isEmptyParagraph(doc.content[index - 1])))
+  return <div className="space-y-2 break-words text-base leading-7" aria-label="收藏预览">{collapsed.map(previewNode)}</div>
 }
 
 function CollectionsView({ user }: { user: User }) {
@@ -82,7 +85,6 @@ function CollectionsView({ user }: { user: User }) {
   const [actionNotice, setActionNotice] = useState('')
   const [pending, setPending] = useState(false)
   const [editing, setEditing] = useState<EditorState | null>(null)
-  const [confirmDiscard, setConfirmDiscard] = useState(false)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [invalidDraft, setInvalidDraft] = useState(false)
   const [confirmId, setConfirmId] = useState<string | null>(null)
@@ -217,22 +219,15 @@ function CollectionsView({ user }: { user: User }) {
     setEditing({ id: row.id, initialDoc: doc, session: ++session.current, weekKey: row.week_key })
   }
 
-  function discard() {
-    setConfirmDiscard(false)
+  function requestClose() {
+    if (pending || !editing) return
     setEditing(null)
     setDraft(null)
     setInvalidDraft(false)
     setActionError('')
   }
 
-  function requestClose() {
-    if (pending || !editing) return
-    const original = editing.initialDoc ?? { type: 'doc', content: [{ type: 'paragraph' }] }
-    if (invalidDraft || (draft && JSON.stringify(draft.doc) !== JSON.stringify(original))) setConfirmDiscard(true)
-    else discard()
-  }
-
-  async function save() {
+  async function save(closeAfterSave = true) {
     const doc = draft?.doc
     if (busy.current || !editing || invalidDraft || !doc || !collectionPlainText(doc).trim()) return
     busy.current = true
@@ -250,8 +245,12 @@ function CollectionsView({ user }: { user: User }) {
       setRows((current) => saved.week_key === selectedWeekKey
         ? [saved, ...current.filter((item) => item.id !== saved.id)]
         : current.filter((item) => item.id !== saved.id))
-      setEditing(null)
-      setDraft(null)
+      if (closeAfterSave) {
+        setEditing(null)
+        setDraft(null)
+      } else {
+        setEditing((current) => current ? { ...current, id: saved.id, initialDoc: doc } : current)
+      }
       void refreshArchive()
       void refreshRows()
     } catch (cause) {
@@ -363,7 +362,12 @@ function CollectionsView({ user }: { user: User }) {
       <Dialog.Root open={Boolean(editing)} onOpenChange={(open) => { if (!open) requestClose() }}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/45 backdrop-blur-[2px]" />
-          <Dialog.Content className="fixed top-1/2 left-1/2 z-50 flex h-[85vh] w-[90vw] -translate-x-1/2 -translate-y-1/2 flex-col gap-5 overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl sm:p-7">
+          <Dialog.Content onKeyDown={(event) => {
+            if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 's') {
+              event.preventDefault()
+              void save(false)
+            }
+          }} className="fixed top-1/2 left-1/2 z-50 flex h-[85vh] w-[90vw] -translate-x-1/2 -translate-y-1/2 flex-col gap-5 overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl sm:p-7">
             <div className="flex shrink-0 flex-wrap items-start justify-between gap-4">
               <div className="space-y-1"><Dialog.Title className="text-xl font-semibold text-slate-900">{editing?.id ? '编辑收藏' : '记录新发现'}</Dialog.Title><Dialog.Description className="text-sm leading-relaxed text-muted-foreground">粘贴纯文本，选中词句后使用上方色板；不保留原网页格式。</Dialog.Description></div>
               {editing && <label className="grid gap-1 text-xs text-muted-foreground">周分类<select aria-label="周分类" value={editing.weekKey ?? ''} disabled={pending} onChange={(event) => setEditing((current) => current ? { ...current, weekKey: event.target.value || null } : current)} className="h-9 rounded-md border bg-white px-3 text-sm text-slate-900"><option value="">未分类</option>{weeks.map((week) => <option key={week.key} value={week.key}>{week.key} · {formatCollectionWeekRange(week)}</option>)}</select></label>}
@@ -371,7 +375,7 @@ function CollectionsView({ user }: { user: User }) {
             {editing && <CollectionEditor key={editing.session} initialDoc={editing.initialDoc} disabled={pending} onChange={(doc) => { setInvalidDraft(!doc); setDraft(doc ? { doc, text: collectionPlainText(doc) } : null) }} />}
             {editing && invalidDraft && <p role="alert" className="shrink-0 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">内容格式无效或超出长度限制，请调整后再保存。</p>}
             {editing && actionError && <p role="alert" className="shrink-0 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{actionError}</p>}
-            <div className="flex shrink-0 flex-wrap items-center justify-between gap-3"><span className="text-xs text-muted-foreground">Enter 与 Shift + Enter 换行 · 点击保存收藏</span><div className="ml-auto flex gap-3"><Button type="button" variant="outline" disabled={pending} onClick={requestClose}>取消</Button><Button type="button" disabled={pending || invalidDraft || !draft?.text.trim()} onClick={() => void save()}>{pending ? '保存中…' : '保存收藏'}</Button></div></div>
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-3"><span className="text-xs text-muted-foreground">Enter 与 Shift + Enter 换行 · ⌘ + S 保存收藏</span><div className="ml-auto flex gap-3"><Button type="button" variant="outline" disabled={pending} onClick={requestClose}>取消</Button><Button type="button" disabled={pending || invalidDraft || !draft?.text.trim()} onClick={() => void save()}>{pending ? '保存中…' : '保存收藏'}</Button></div></div>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
@@ -387,16 +391,6 @@ function CollectionsView({ user }: { user: User }) {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
-
-      <AlertDialog.Root open={confirmDiscard} onOpenChange={setConfirmDiscard}>
-        <AlertDialog.Portal>
-          <AlertDialog.Overlay className="fixed inset-0 z-[60] bg-slate-950/55" />
-          <AlertDialog.Content className="fixed top-1/2 left-1/2 z-[60] w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 space-y-4 rounded-xl bg-white p-6 shadow-2xl">
-            <AlertDialog.Title className="text-lg font-semibold text-slate-900">放弃未保存的修改？</AlertDialog.Title><AlertDialog.Description className="text-sm text-muted-foreground">关闭后，本次编辑的内容将不会保存。</AlertDialog.Description>
-            <div className="flex justify-end gap-3"><AlertDialog.Cancel asChild><Button variant="outline">继续编辑</Button></AlertDialog.Cancel><AlertDialog.Action asChild><Button variant="destructive" onClick={discard}>放弃修改</Button></AlertDialog.Action></div>
-          </AlertDialog.Content>
-        </AlertDialog.Portal>
-      </AlertDialog.Root>
 
       {!editing && !summaryOpen && actionError && <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">{actionError}</p>}
       {actionNotice && <p role="status" className="rounded-xl border border-primary/20 bg-accent p-4 text-sm text-accent-foreground">{actionNotice}</p>}

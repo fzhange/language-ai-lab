@@ -32,6 +32,12 @@ React Web 应用，让用户与语言学习 AI Agent 交流，并整合浏览器
 
 ## 技术栈
 
+### 导师交互式内容
+
+- 理解检查使用 `@openuidev/react-lang` 的受限组件库渲染，保留现有 `@langchain/react` / LangGraph 原生传输，不迁移到 AG-UI。
+- `present_understanding_check` 工具消息携带版本化的问题与选项；前端用 Zod 校验后生成规范 OpenUI 程序，仅注册学习组件，不执行模型提供的任意 Query、Mutation、HTML 或脚本。
+- 回答通过同一导师会话提交，包含工具调用 ID；导师解释原因，历史中的答案用于恢复已提交状态。普通讲解仍使用 Markdown。
+
 - Vite + React 19 + TypeScript + Tailwind CSS v4（`@tailwindcss/vite` 插件，`src/index.css` 只有一行 `@import 'tailwindcss'`）
 - `@langchain/react` 的 `useStream` 直连 LangGraph Server（**不是 AG-UI**，是 langgraph-sdk 流式协议）
 - `@supabase/supabase-js`：邮箱密码 Auth + 读 `whw_highlights`（RLS 按 `user_id` 隔离）

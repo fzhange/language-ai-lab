@@ -176,12 +176,90 @@ describe('weekly collections', () => {
     expect(screen.getByLabelText('收藏预览').querySelector('hr')).not.toBeNull()
   })
 
-  it('asks before discarding a changed draft', async () => {
+  it('collapses stacked empty paragraphs from pasted content so the preview has no oversized gaps', async () => {
+    db.list.mockResolvedValue([{ ...row, content_doc: { type: 'doc', content: [
+      { type: 'paragraph', content: [{ type: 'text', text: 'First block' }] },
+      { type: 'paragraph' },
+      { type: 'paragraph' },
+      { type: 'paragraph' },
+      { type: 'paragraph', content: [{ type: 'text', text: 'Second block' }] },
+    ] } }])
+    view()
+    const preview = await screen.findByLabelText('收藏预览')
+    expect(within(preview).getByText('First block')).toBeInTheDocument()
+    expect(within(preview).getByText('Second block')).toBeInTheDocument()
+    // 三个连续空段落只保留一个空的 <p>，不应该把全部空段落都渲染出来。
+    const paragraphs = Array.from(preview.querySelectorAll('p'))
+    const emptyParagraphs = paragraphs.filter((p) => p.textContent === '')
+    expect(emptyParagraphs).toHaveLength(1)
+  })
+
+  it('closes a changed draft on cancel without another confirmation', async () => {
     view()
     await userEvent.click(screen.getByRole('button', { name: '新增收藏' }))
     fireEvent.change(screen.getByRole('textbox', { name: '收藏正文' }), { target: { value: 'Unsaved' } })
     await userEvent.click(screen.getByRole('button', { name: '取消' }))
-    expect(screen.getByRole('alertdialog', { name: '放弃未保存的修改？' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '记录新发现' })).toBeNull()
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(db.create).not.toHaveBeenCalled()
+  })
+
+  it('closes a changed draft on Escape without another confirmation', async () => {
+    view()
+    await userEvent.click(screen.getByRole('button', { name: '新增收藏' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '收藏正文' }), { target: { value: 'Unsaved' } })
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog', { name: '记录新发现' })).toBeNull()
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+  })
+
+  it('keeps a new draft open after Command+S and updates it on the next save', async () => {
+    db.list.mockResolvedValue([])
+    view()
+    await userEvent.click(screen.getByRole('button', { name: '新增收藏' }))
+    const input = screen.getByRole('textbox', { name: '收藏正文' })
+    fireEvent.change(input, { target: { value: 'Keyboard insight' } })
+    expect(fireEvent.keyDown(input, { key: 's', metaKey: true, cancelable: true })).toBe(false)
+    await waitFor(() => expect(db.create).toHaveBeenCalledWith('reader', 'Keyboard insight', { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Keyboard insight' }] }] }, currentWeek.key))
+    expect(await screen.findByRole('dialog', { name: '编辑收藏' })).toBeInTheDocument()
+    expect(input).toHaveValue('Keyboard insight')
+    fireEvent.change(input, { target: { value: 'More insight' } })
+    fireEvent.keyDown(input, { key: 's', metaKey: true, cancelable: true })
+    await waitFor(() => expect(db.update).toHaveBeenCalledWith('one', 'reader', 'More insight', { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'More insight' }] }] }, currentWeek.key))
+    expect(db.create).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('dialog', { name: '编辑收藏' })).toBeInTheDocument()
+  })
+
+  it('keeps an edited draft open after Command+S', async () => {
+    view()
+    await userEvent.click(await screen.findByRole('button', { name: '编辑收藏' }))
+    const input = screen.getByRole('textbox', { name: '收藏正文' })
+    fireEvent.change(input, { target: { value: 'Revised insight' } })
+    fireEvent.keyDown(input, { key: 's', metaKey: true, cancelable: true })
+    await waitFor(() => expect(db.update).toHaveBeenCalledWith('one', 'reader', 'Revised insight', { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Revised insight' }] }] }, currentWeek.key))
+    expect(screen.getByRole('dialog', { name: '编辑收藏' })).toBeInTheDocument()
+    expect(input).toHaveValue('Revised insight')
+  })
+
+  it('still closes the editor when clicking save after a shortcut save', async () => {
+    view()
+    await userEvent.click(await screen.findByRole('button', { name: '编辑收藏' }))
+    const input = screen.getByRole('textbox', { name: '收藏正文' })
+    fireEvent.change(input, { target: { value: 'Revised insight' } })
+    fireEvent.keyDown(input, { key: 's', metaKey: true, cancelable: true })
+    await waitFor(() => expect(db.update).toHaveBeenCalledTimes(1))
+    await userEvent.click(screen.getByRole('button', { name: '保存收藏' }))
+    await waitFor(() => expect(db.update).toHaveBeenCalledTimes(2))
+    expect(screen.queryByRole('dialog', { name: '编辑收藏' })).toBeNull()
+  })
+
+  it('does not save an empty draft with Command+S', async () => {
+    view()
+    await userEvent.click(screen.getByRole('button', { name: '新增收藏' }))
+    const input = screen.getByRole('textbox', { name: '收藏正文' })
+    expect(fireEvent.keyDown(input, { key: 's', metaKey: true, cancelable: true })).toBe(false)
+    expect(db.create).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: '记录新发现' })).toBeInTheDocument()
   })
 
   it('exposes the collection route in the application shell', async () => {

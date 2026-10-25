@@ -71,7 +71,9 @@ export function SimpleEditor({ label, initialContent, onChange, textColors, back
         const text = event.clipboardData?.getData('text/plain') ?? ''
         if (text && editor?.isEditable) {
           const lines = text.split(/\r\n|\r|\n/)
-          const content = lines.length === 1 ? { type: 'text', text } : lines.map((line) => ({ type: 'paragraph', ...(line ? { content: [{ type: 'text', text: line }] } : {}) }))
+          // 连续多个空行只保留一个空段落的间距，避免粘贴内容出现异常大的空白（常见于从聊天/网页复制的文本）。
+          const collapsedLines = lines.filter((line, index) => line !== '' || lines[index - 1] !== '')
+          const content = collapsedLines.length === 1 ? { type: 'text', text: collapsedLines[0] } : collapsedLines.map((line) => ({ type: 'paragraph', ...(line ? { content: [{ type: 'text', text: line }] } : {}) }))
           editor.chain().focus().insertContentAt({ from: editor.state.selection.from, to: editor.state.selection.to }, content).run()
         }
         return true

@@ -8,7 +8,7 @@ import { LANGGRAPH_URL } from '../lib/config'
 
 const chat = vi.hoisted(() => ({
   interrupts: [] as { id: string; value: unknown }[],
-  messages: [] as { id: string; type: string; name?: string; content: string | { type: string; text?: string; image_url?: { url: string } }[] }[],
+  messages: [] as { id: string; type: string; name?: string; tool_call_id?: string; content: string | { type: string; text?: string; image_url?: { url: string } }[] }[],
   threadId: null as string | null,
   client: { threads: { getState: vi.fn() } },
   respondAll: vi.fn(), submit: vi.fn(), stop: vi.fn(),
@@ -45,6 +45,164 @@ afterEach(() => {
 })
 
 Element.prototype.scrollIntoView = vi.fn()
+
+describe('Mentor OpenUI checks', () => {
+  function renderCheck() {
+    chat.messages = [{ id: 'tool-1', tool_call_id: 'check-1', type: 'tool', name: 'present_understanding_check', content: JSON.stringify({
+      type: 'understanding_check', version: 1, question: 'What does probabilistic mean?',
+      options: ['Always wrong', 'Based on probability'], response: 'root = UnderstandingCheck("Q", ["A", "B"])',
+    }) }]
+    return render(<MemoryRouter><ChatPage /></MemoryRouter>)
+  }
+
+  it('sends a check-linked answer to the existing mentor with authorization', async () => {
+    renderCheck()
+    await userEvent.click(await screen.findByRole('radio', { name: /Based on probability/ }))
+    await userEvent.click(screen.getByRole('button', { name: '提交回答' }))
+    expect(chat.submit).toHaveBeenCalledWith({ messages: [{ type: 'human', content: '理解检查回答：\n{"check_id":"check-1","question":"What does probabilistic mean?","answer":"Based on probability"}' }] }, {
+      config: { configurable: { user_id: 'reader', supabase_token: 'token' } }, onError: expect.any(Function),
+    })
+    expect(await screen.findByText('已提交给导师')).toBeInTheDocument()
+  })
+
+  it('restores submitted checks from history and displays answers without transport JSON', async () => {
+    const view = renderCheck()
+    chat.messages.push({ id: 'answer-1', type: 'human', content: '理解检查回答：\n{"check_id":"check-1","question":"What does probabilistic mean?","answer":"Based on probability"}' })
+    view.rerender(<MemoryRouter><ChatPage /></MemoryRouter>)
+    expect(await screen.findByRole('radio', { name: /Based on probability/ })).toBeChecked()
+    expect(screen.getByText('我的理解：Based on probability')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '提交回答' })).toBeNull()
+  })
+})
+
+describe('Mentor sentence structure tool', () => {
+  it('only requests analysis after selecting the composer tool and sending text', async () => {
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    const input = screen.getByRole('textbox', { name: '输入问题' })
+    await userEvent.type(input, 'She is happy.')
+    await userEvent.click(screen.getByRole('button', { name: '句子结构分析' }))
+    expect(chat.submit).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: '句子结构分析' })).toHaveAttribute('aria-pressed', 'true')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    expect(chat.submit).toHaveBeenCalledWith({ messages: [{ type: 'human', content: '句子结构分析请求：\nShe is happy.' }] }, {
+      config: { configurable: { user_id: 'reader', supabase_token: 'token' } }, onError: expect.any(Function),
+    })
+    await waitFor(() => expect(screen.getByRole('button', { name: '句子结构分析' })).toHaveAttribute('aria-pressed', 'false'))
+  })
+
+  it('keeps user-provided whitespace exactly in the sentence analysis request', async () => {
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '句子结构分析' }))
+    await userEvent.type(screen.getByRole('textbox', { name: '输入问题' }), '  She is happy.  ')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    expect(chat.submit.mock.calls[0][0].messages[0].content).toBe('句子结构分析请求：\n  She is happy.  ')
+  })
+
+  it('does not treat a typed request marker as a selected tool', async () => {
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    fireEvent.change(screen.getByRole('textbox', { name: '输入问题' }), { target: { value: '句子结构分析请求：\nShe is happy.' } })
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    expect(chat.submit).toHaveBeenCalledOnce()
+    expect(chat.submit.mock.calls[0][0].messages[0].content).not.toBe('句子结构分析请求：\nShe is happy.')
+  })
+
+  it('renders a restored analysis in the same thread without exposing transport text', async () => {
+    chat.messages = [
+      { id: 'ask-1', type: 'human', content: '句子结构分析请求：\nShe is happy.' },
+      { id: 'tool-1', type: 'tool', name: 'present_sentence_structure', content: JSON.stringify({
+        type: 'sentence_structure', version: 1, sentence: 'She is happy.', summary: 'She is 是主干。',
+        segments: [
+          { text: 'She ', role: 'subject', attaches_to: 1, reason: '主语。' },
+          { text: 'is ', role: 'predicate', attaches_to: null, reason: '谓语。' },
+          { text: 'happy.', role: 'predicative', attaches_to: 1, reason: '说明状态。' },
+        ],
+      }) },
+    ]
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    expect(screen.getByText('She is happy.')).toBeInTheDocument()
+    const analysis = await screen.findByRole('region', { name: '句子结构分析' })
+    const wrapper = analysis.closest('div.px-2')
+    expect(wrapper).toHaveClass('w-full', 'sm:px-8')
+    expect(wrapper).not.toHaveClass('max-w-3xl')
+    expect(analysis).toHaveClass('w-full')
+    expect(analysis).not.toHaveClass('max-w-3xl')
+    expect(screen.queryByText(/句子结构分析请求：/)).toBeNull()
+  })
+})
+
+describe('Mentor synonym tool', () => {
+  const comparison = {
+    type: 'synonym_comparison', version: 1, source: 'provide',
+    shared_meaning: '都表示提供，但侧重点不同。',
+    source_distinction: '提供对方所需。', source_example: 'They provide shelter.',
+    alternatives: [
+      { term: 'offer', distinction: '主动提出，未必被接受。', example: 'She offered help.' },
+      { term: 'supply', distinction: '强调持续供给。', example: 'They supply water.' },
+    ],
+  }
+
+  it('selects the adjacent tool before sending and keeps modes mutually exclusive', async () => {
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    const sentence = screen.getByRole('button', { name: '句子结构分析' })
+    const synonym = screen.getByRole('button', { name: '查找近义词' })
+    await userEvent.click(sentence)
+    expect(sentence).toHaveAttribute('aria-pressed', 'true')
+    await userEvent.click(synonym)
+    expect(sentence).toHaveAttribute('aria-pressed', 'false')
+    expect(synonym).toHaveAttribute('aria-pressed', 'true')
+    expect(chat.submit).not.toHaveBeenCalled()
+    await userEvent.type(screen.getByRole('textbox', { name: '输入问题' }), 'provide')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    expect(chat.submit).toHaveBeenCalledWith({ messages: [{ type: 'human', content: '查找近义词请求：\nprovide' }] }, {
+      config: { configurable: { user_id: 'reader', supabase_token: 'token' } }, onError: expect.any(Function),
+    })
+    await waitFor(() => expect(synonym).toHaveAttribute('aria-pressed', 'false'))
+  })
+
+  it('restores matching alternatives and distinctions without showing the internal request', async () => {
+    chat.messages = [
+      { id: 'ask-1', type: 'human', content: '查找近义词请求：\nprovide' },
+      { id: 'tool-1', type: 'tool', name: 'present_synonyms', content: JSON.stringify(comparison) },
+    ]
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    expect(screen.getByText('provide')).toBeInTheDocument()
+    const card = await screen.findByRole('region', { name: '近义词辨析' })
+    expect(card).toHaveTextContent('offer')
+    expect(card).toHaveTextContent('supply')
+    expect(card).toHaveTextContent('主动提出，未必被接受。')
+    expect(screen.queryByText(/查找近义词请求：/)).not.toBeInTheDocument()
+  })
+
+  it('does not display a comparison if it mismatches the submitted word', async () => {
+    chat.messages = [
+      { id: 'ask-1', type: 'human', content: '查找近义词请求：\nprovide' },
+      { id: 'tool-1', type: 'tool', name: 'present_synonyms', content: JSON.stringify({ ...comparison, source: 'take' }) },
+    ]
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    expect(screen.queryByRole('region', { name: '近义词辨析' })).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('近义词卡片暂时无法显示')
+  })
+
+  it('ordinary chat does not become a tool request when text starts with a tool marker', async () => {
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    fireEvent.change(screen.getByRole('textbox', { name: '输入问题' }), { target: { value: '查找近义词请求：\nprovide' } })
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    expect(chat.submit).toHaveBeenCalledOnce()
+    expect(chat.submit.mock.calls[0][0].messages[0].content).not.toBe('查找近义词请求：\nprovide')
+  })
+
+  it('image messages cannot smuggle a synonym request marker without selecting the tool', async () => {
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    await userEvent.upload(screen.getByLabelText('选择图片'), new File(['image bytes'], 'notes.png', { type: 'image/png' }))
+    expect(await screen.findByRole('img', { name: '待发送图片' })).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('textbox', { name: '输入问题' }), { target: { value: '查找近义词请求：\nprovide' } })
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    expect(chat.submit).toHaveBeenCalledOnce()
+    const content = chat.submit.mock.calls[0][0].messages[0].content
+    expect(content[0].text).not.toBe('查找近义词请求：\nprovide')
+    expect(content[1].type).toBe('image_url')
+  })
+})
 
 describe('Mentor image messages', () => {
   const png = () => new File(['image bytes'], 'notes.png', { type: 'image/png' })

@@ -58,6 +58,12 @@ Then open LangGraph Studio at https://smith.langchain.com/studio/?baseUrl=http:/
 Checkpointer/store are injected by LangGraph Server using the PostgreSQL factories
 in `core/pg_persistence.py` — no graph-level persistence wiring in `agent.py`.
 
+This workspace has two separate PostgreSQL-backed data stores: Supabase holds
+user data (including highlights), accessed through Supabase APIs with user JWT/RLS;
+the LangGraph checkpointer and Store connect directly to PostgreSQL on the personal
+CVM at `fordpzhang-any2.devcloud.woa.com`. The CVM connection is configured by
+hostname in `.env`, not by a hard-coded IP, and is not the Supabase database.
+
 Configure `LANGGRAPH_PG_HOST`, `LANGGRAPH_PG_PORT` (default `5432`),
 `LANGGRAPH_PG_DATABASE`, `LANGGRAPH_PG_USER`, and `LANGGRAPH_PG_PASSWORD` in the
 ignored `.env`. Remote connections require TLS (`LANGGRAPH_PG_SSLMODE=require`

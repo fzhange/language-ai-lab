@@ -39,7 +39,7 @@ async def make_language_mentor():
             "name": "general-purpose",
             "description": "检索资料和准备教案草稿，最终文件由主导师审批后创建。",
             "system_prompt": "协助主导师检索语言学习资料并准备草稿，返回完整内容和出处。不要创建最终教案文件。",
-            "tools": [tool for tool in tools if tool.name not in {"create_markdown", "save_learning_memory"}],
+            "tools": [tool for tool in tools if tool.name not in {"create_markdown", "save_learning_memory", "present_understanding_check", "present_sentence_structure", "present_synonyms"}],
             "interrupt_on": {},
         }],
         # 代理偶发丢失工具名时按参数签名自愈（见 core/middleware.py）；

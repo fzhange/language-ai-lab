@@ -1,4 +1,8 @@
-"""Server-level PostgreSQL persistence; connection secrets are environment-only."""
+"""LangGraph checkpoint/store persistence on the personal CVM PostgreSQL.
+
+This direct LANGGRAPH_PG_* connection is separate from Supabase user data,
+which is accessed through Supabase APIs. Connection secrets are environment-only.
+"""
 
 import asyncio
 import os

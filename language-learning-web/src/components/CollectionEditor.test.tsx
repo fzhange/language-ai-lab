@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import '@testing-library/jest-dom/vitest'
 import { CollectionEditor } from './CollectionEditor'
 import type { CollectionDoc } from '../lib/collection-document'
@@ -97,5 +98,31 @@ describe('collection editor', () => {
     expect(screen.getByRole('button', { name: '文字颜色 蓝色' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '背景颜色 黄色' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '清除选中格式' })).toBeInTheDocument()
+  })
+
+  it('switches to markdown mode, edits text, and syncs the parsed document', async () => {
+    const onChange = vi.fn()
+    const doc: CollectionDoc = { type: 'doc', content: [{ type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Title' }] }] }
+    render(<CollectionEditor initialDoc={doc} onChange={onChange} />)
+    await userEvent.click(screen.getByRole('tab', { name: 'Markdown' }))
+    const markdown = screen.getByRole('textbox', { name: '收藏内容（Markdown）' })
+    expect(markdown).toHaveValue('## Title')
+    await userEvent.type(markdown, '\n\nMore **bold** text')
+    await waitFor(() => expect(onChange.mock.lastCall?.[1]).toContain('More bold text'))
+    const latestDoc = onChange.mock.lastCall?.[0] as CollectionDoc
+    const boldNode = latestDoc.content.flatMap((n) => n.content ?? []).find((n) => n.marks?.some((m) => m.type === 'bold'))
+    expect(boldNode?.text).toBe('bold')
+  })
+
+  it('round-trips an edit back to the rich-text tab', async () => {
+    const onChange = vi.fn()
+    render(<CollectionEditor initialDoc={{ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Start' }] }] }} onChange={onChange} />)
+    await userEvent.click(screen.getByRole('tab', { name: 'Markdown' }))
+    const markdown = screen.getByRole('textbox', { name: '收藏内容（Markdown）' })
+    fireEvent.change(markdown, { target: { value: '# Heading\n\nBody text' } })
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+    await userEvent.click(screen.getByRole('tab', { name: '富文本' }))
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Heading')
+    expect(screen.getByRole('textbox', { name: '收藏内容' })).toHaveTextContent('Body text')
   })
 })

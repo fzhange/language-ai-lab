@@ -85,6 +85,21 @@ describe('shared simple editor', () => {
     expect(parseCollectionDoc(onChange.mock.lastCall?.[0])).not.toBeNull()
   })
 
+  it('collapses runs of blank lines on paste into a single empty paragraph', async () => {
+    const onChange = vi.fn()
+    render(<SimpleEditor {...props} onChange={onChange} />)
+    const editor = screen.getByRole('textbox', { name: '复用文本编辑器' })
+    fireEvent.paste(editor, { clipboardData: { getData: () => 'First block\n\n\n\nSecond block' } })
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+    const doc = onChange.mock.lastCall?.[0]
+    expect(parseCollectionDoc(doc)).not.toBeNull()
+    const paragraphs = doc.content as { content?: { text: string }[] }[]
+    const emptyParagraphs = paragraphs.filter((p) => !p.content?.length)
+    expect(emptyParagraphs).toHaveLength(1)
+    expect(editor.textContent).toContain('First block')
+    expect(editor.textContent).toContain('Second block')
+  })
+
   it('uses larger, matching type for editor text and its empty placeholder', () => {
     render(<SimpleEditor {...props} />)
     const content = screen.getByRole('textbox', { name: '复用文本编辑器' }).parentElement

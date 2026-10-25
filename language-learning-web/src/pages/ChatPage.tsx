@@ -1,20 +1,27 @@
 /** 导师对话页：useStream 直连 LangGraph Server 的 language-mentor 图谱（SSE 流式）。 */
 
-import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useStream } from '@langchain/react'
 import { Dialog } from 'radix-ui'
-import { ArrowUp, CircleStop, ImagePlus, LoaderCircle, MessageCircle, Plus, Sparkles, Trash2, X } from 'lucide-react'
+import { ArrowUp, BookOpen, CircleStop, GitCompareArrows, ImagePlus, LoaderCircle, MessageCircle, Plus, Sparkles, Trash2, X } from 'lucide-react'
 
 import { MarkdownView } from '../components/MarkdownView'
 import { MarkdownApproval } from '../components/MarkdownApproval'
 import { MarkdownArtifact } from '../components/MarkdownArtifact'
+import { restoredUnderstandingAnswer, understandingAnswer, understandingAnswerText } from '../lib/understanding-check'
+import { parseSentenceStructure, sentenceRequest, sentenceRequestText } from '../lib/sentence-structure'
+import { parseSynonymComparison, synonymRequest, synonymRequestText, SYNONYM_REQUEST_PREFIX } from '../lib/synonym-comparison'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { Card } from '../components/ui/card'
 import { Textarea } from '../components/ui/textarea'
 import { useAuth } from '../lib/auth'
 import { LANGGRAPH_URL, MENTOR_ASSISTANT_ID } from '../lib/config'
+
+const UnderstandingCheck = lazy(() => import('../components/UnderstandingCheck').then((module) => ({ default: module.UnderstandingCheck })))
+const SentenceStructure = lazy(() => import('../components/SentenceStructure').then((module) => ({ default: module.SentenceStructure })))
+const SynonymComparison = lazy(() => import('../components/SynonymComparison').then((module) => ({ default: module.SynonymComparison })))
 
 /** message.content 可能是 string 或内容块数组，统一取文本 */
 function textOf(content: unknown): string {
@@ -212,6 +219,7 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
     onThreadId,
   })
   const [input, setInput] = useState('')
+  const [toolMode, setToolMode] = useState<'sentence' | 'synonym' | null>(null)
   const [image, setImage] = useState<string | null>(null)
   const [imageLoading, setImageLoading] = useState(false)
   const [imageError, setImageError] = useState('')
@@ -324,10 +332,13 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
     e.preventDefault()
     const text = input.trim()
     if ((!text && !image) || imageLoading || stream.isLoading || stream.isThreadLoading || hasPendingApproval || sending) return
-    const content = image ? [
-      { type: 'text', text: text || '请讲解这张图片中的英语内容。' },
+    if (toolMode && (image || input.length > (toolMode === 'sentence' ? 1600 : 120))) return
+    const ordinaryText = text.startsWith('句子结构分析请求：\n') ? `用户原文（非句子结构工具请求）：\n${text}`
+      : text.startsWith(SYNONYM_REQUEST_PREFIX) ? `用户原文（非工具请求）：\n${text}` : text
+    const content = toolMode === 'sentence' ? sentenceRequest(input) : toolMode === 'synonym' ? synonymRequest(text) : image ? [
+      { type: 'text', text: ordinaryText || '请讲解这张图片中的英语内容。' },
       { type: 'image_url', image_url: { url: image } },
-    ] : text
+    ] : ordinaryText
     cancelled.current = false
     setSending(true)
     setRecovering(false)
@@ -352,6 +363,7 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
     ).then(() => {
       if (runFailed || cancelled.current) return
       setInput('')
+      if (toolMode) setToolMode(null)
       ++imageSelection.current
       setImage(null)
       if (imageInputRef.current) imageInputRef.current.value = ''
@@ -365,6 +377,19 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
   const visibleMessages = stream.messages.filter(
     (m) => m.type === 'human' || m.type === 'ai' || m.type === 'tool',
   )
+
+  async function answerCheck(checkId: string, question: string, answer: string) {
+    if (sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval) throw new Error('Mentor is busy')
+    setSending(true)
+    let failed = false
+    try {
+      await stream.submit({ messages: [{ type: 'human', content: understandingAnswer(checkId, question, answer) }] }, {
+        config: { configurable: { user_id: userId ?? undefined, supabase_token: accessToken ?? undefined } },
+        onError: () => { failed = true },
+      })
+      if (failed) throw new Error('Answer submission failed')
+    } finally { setSending(false) }
+  }
 
   return (
     <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-4">
@@ -402,6 +427,41 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
           // 工具返回：可折叠的"过程记录"，默认收起，点开看检索/读取到的内容
           if (msg.type === 'tool') {
             const name = (msg as { name?: string }).name ?? 'tool'
+            if (name === 'present_understanding_check') {
+              const checkId = (msg as { tool_call_id?: string }).tool_call_id ?? msg.id
+              if (!checkId) return null
+              return <div key={msg.id ?? i} className="mx-2 min-w-0 max-w-2xl sm:mx-8">
+                <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">正在加载理解检查…</p>}><UnderstandingCheck content={text} disabled={sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval}
+                  submittedAnswer={restoredUnderstandingAnswer(stream.messages, checkId)}
+                  onAnswer={(question, answer) => answerCheck(checkId, question, answer)} /></Suspense>
+              </div>
+            }
+            if (name === 'present_sentence_structure') {
+              const requested = visibleMessages.slice(0, i).reverse().find((item) => item.type === 'human')
+              const source = requested ? sentenceRequestText(textOf(requested.content)) : undefined
+              const structure = parseSentenceStructure(text)
+              if (source !== undefined && structure?.sentence === source) {
+                return <div key={msg.id ?? i} className="w-full min-w-0 px-2 sm:px-8">
+                  <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">正在加载句子结构…</p>}>
+                    <SentenceStructure content={text} />
+                  </Suspense>
+                </div>
+              }
+              return <p key={msg.id ?? i} role="status" className="mx-2 text-sm text-muted-foreground sm:mx-8">结构图暂时无法显示，请让导师用文字解释这句话。</p>
+            }
+            if (name === 'present_synonyms') {
+              const requested = visibleMessages.slice(0, i).reverse().find((item) => item.type === 'human')
+              const source = requested ? synonymRequestText(textOf(requested.content)) : undefined
+              const comparison = parseSynonymComparison(text)
+              if (source !== undefined && comparison?.source === source) {
+                return <div key={msg.id ?? i} className="w-full min-w-0 px-2 sm:px-8">
+                  <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">正在加载近义词辨析…</p>}>
+                    <SynonymComparison content={text} />
+                  </Suspense>
+                </div>
+              }
+              return <p key={msg.id ?? i} role="status" className="mx-2 text-sm text-muted-foreground sm:mx-8">近义词卡片暂时无法显示，请让导师用文字解释。</p>
+            }
             if (name === 'create_markdown' && text.includes('"markdown_artifact"')) {
               return <MarkdownArtifact key={msg.id ?? i} result={text} accessToken={accessToken} />
             }
@@ -458,7 +518,7 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
                 {isHuman ? (
                   <div className="space-y-2">
                     {messageImage && <img src={messageImage} alt="已发送图片" className="max-h-60 max-w-full rounded-lg object-contain" />}
-                    {text && <p className="whitespace-pre-wrap">{text}</p>}
+                    {text && <p className="whitespace-pre-wrap">{understandingAnswerText(text) ?? sentenceRequestText(text) ?? synonymRequestText(text) ?? text}</p>}
                   </div>
                 ) : (
                   <MarkdownView>{text}</MarkdownView>
@@ -518,9 +578,9 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
         {imageError && <p role={recovering ? 'status' : 'alert'} className={`text-xs ${recovering ? 'text-amber-700' : 'text-destructive'}`}>{imageError}</p>}
         <div className="flex items-end gap-2">
           <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp" aria-label="选择图片"
-            disabled={sending || stream.isLoading} className="sr-only" onChange={(e: ChangeEvent<HTMLInputElement>) => selectImage(e.target.files?.[0])} />
+            disabled={Boolean(toolMode) || sending || stream.isLoading} className="sr-only" onChange={(e: ChangeEvent<HTMLInputElement>) => selectImage(e.target.files?.[0])} />
           <Button type="button" variant="ghost" size="icon" aria-label="添加图片" title="添加图片（也可粘贴截图）"
-            disabled={sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval}
+            disabled={Boolean(toolMode) || sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval}
             onClick={() => imageInputRef.current?.click()} className="mb-1 shrink-0">
             <ImagePlus className="size-5" />
           </Button>
@@ -529,7 +589,7 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
             disabled={sending || stream.isLoading}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onPaste={pasteImage}
+            onPaste={toolMode ? undefined : pasteImage}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault()
@@ -537,7 +597,7 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
               }
             }}
             rows={2}
-            placeholder="输入你的问题或粘贴截图…（Enter 发送，Shift + Enter 换行）"
+            placeholder={toolMode === 'sentence' ? '粘贴一条英文句子，发送后分析主干与修饰关系…' : toolMode === 'synonym' ? '输入一个英文单词或短语，例如 provide…' : '输入你的问题或粘贴截图…（Enter 发送，Shift + Enter 换行）'}
             className="max-h-40 min-w-0 flex-1 resize-y border-0 bg-transparent shadow-none focus-visible:border-transparent focus-visible:ring-0"
           />
           {stream.isLoading || sending ? (
@@ -545,10 +605,24 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
               <CircleStop />停止
             </Button>
           ) : (
-            <Button type="submit" disabled={(!input.trim() && !image) || imageLoading || sending || stream.isThreadLoading || hasPendingApproval} className="mb-1">
+            <Button type="submit" disabled={(!input.trim() && !image) || (toolMode === 'sentence' && input.length > 1600) || (toolMode === 'synonym' && input.trim().length > 120) || imageLoading || sending || stream.isThreadLoading || hasPendingApproval} className="mb-1">
               <ArrowUp />发送
             </Button>
           )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 border-t pt-2">
+          <Button type="button" size="sm" variant={toolMode === 'sentence' ? 'secondary' : 'ghost'} aria-pressed={toolMode === 'sentence'}
+            disabled={Boolean(image) || imageLoading || sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval}
+            onClick={() => setToolMode((current) => current === 'sentence' ? null : 'sentence')} className="h-8 rounded-full text-xs">
+            <BookOpen className="size-3.5" />句子结构分析
+          </Button>
+          <Button type="button" size="sm" variant={toolMode === 'synonym' ? 'secondary' : 'ghost'} aria-pressed={toolMode === 'synonym'}
+            disabled={Boolean(image) || imageLoading || sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval}
+            onClick={() => setToolMode((current) => current === 'synonym' ? null : 'synonym')} className="h-8 rounded-full text-xs">
+            <GitCompareArrows className="size-3.5" />查找近义词
+          </Button>
+          {toolMode === 'sentence' && <span className="text-xs text-muted-foreground">选中后发送一句英文 · 最多 1600 字</span>}
+          {toolMode === 'synonym' && <span className="text-xs text-muted-foreground">选中后输入一个英文词或短语 · 最多 120 字</span>}
         </div>
       </form>
     </div>
