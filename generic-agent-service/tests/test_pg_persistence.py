@@ -40,7 +40,13 @@ class PostgresConfigurationTests(unittest.IsolatedAsyncioTestCase):
                   'metadata': {'authorization': 'Bearer secret-jwt'}}
         metadata = {'step': 1, 'run_id': 'r', 'supabase_token': 'secret-jwt',
                     'nested': {'password': 'secret-password', 'topic': 'grammar'}}
-        with patch('core.pg_persistence.AsyncPostgresSaver.aput', new_callable=AsyncMock, return_value={'configurable': {'thread_id': 't'}}) as write:
+        cursor = MagicMock()
+        @asynccontextmanager
+        async def cursor_context(*args, **kwargs):
+            yield cursor
+        with patch.object(saver, '_cursor', side_effect=cursor_context), patch.object(
+            saver, '_deleted_messages', new_callable=AsyncMock, return_value=set()
+        ), patch('core.pg_persistence.AsyncPostgresSaver.aput', new_callable=AsyncMock, return_value={'configurable': {'thread_id': 't'}}) as write:
             await saver.aput(config, empty_checkpoint(), metadata, {})
         args = write.call_args.args
         self.assertNotIn('secret-jwt', json.dumps([args[0], args[2]]))

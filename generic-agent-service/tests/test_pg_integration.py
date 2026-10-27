@@ -23,6 +23,39 @@ from test_markdown_artifacts import ToolCallingModel
 
 @unittest.skipUnless(os.environ.get('RUN_PG_INTEGRATION') == '1', 'requires explicit PostgreSQL test approval')
 class PostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reply_deletion_scrubs_history_and_survives_stale_writes(self):
+        from deepagents import create_deep_agent
+        from core.pg_persistence import create_checkpointer
+        from core.message_deletion import find_reply
+
+        thread_id = 'test-delete-reply-' + uuid.uuid4().hex
+        config = {'configurable': {'thread_id': thread_id}, 'metadata': {'user_id': 'test-owner'}}
+        try:
+            async with create_checkpointer() as saver:
+                graph = create_deep_agent(model=ToolCallingModel(responses=[AIMessage(content='unneeded-summary'), AIMessage(content='keep-this')]), checkpointer=saver)
+                first = await graph.ainvoke({'messages': [{'role': 'user', 'content': 'first question'}]}, config)
+                reply = first['messages'][-1]
+                stale_checkpoint = await saver.aget_tuple(config)
+                await graph.ainvoke({'messages': [{'role': 'user', 'content': 'second question'}]}, config)
+                latest = await saver.aget_tuple(config)
+                await saver.delete_reply(thread_id, reply.id, 'test-owner', latest.config['configurable']['checkpoint_id'])
+                state = await graph.aget_state(config)
+                self.assertNotIn(reply.id, [message.id for message in state.values['messages']])
+                self.assertEqual(state.values['messages'][-1].content, 'keep-this')
+                async for snapshot in graph.aget_state_history(config):
+                    self.assertNotIn(reply.id, [message.id for message in snapshot.values.get('messages', [])])
+                # A delayed writer must not reintroduce content from before deletion.
+                await saver.aput_writes(latest.config, [('messages', [reply])], 'stale-task')
+                await saver.aput(stale_checkpoint.config, stale_checkpoint.checkpoint, stale_checkpoint.metadata, {})
+                async with saver._cursor() as cursor:
+                    await cursor.execute('SELECT type, blob FROM checkpoint_blobs WHERE thread_id = %s UNION ALL SELECT type, blob FROM checkpoint_writes WHERE thread_id = %s', (thread_id, thread_id))
+                    for row in await cursor.fetchall():
+                        if row['blob'] is not None and row['type'] != 'empty':
+                            self.assertIsNone(find_reply(saver.serde.loads_typed((row['type'], bytes(row['blob']))), reply.id))
+        finally:
+            async with create_checkpointer() as saver:
+                await saver.adelete_thread(thread_id)
+
     async def test_reopened_connections_restore_checkpoints_store_and_memory(self):
         from core.pg_persistence import create_checkpointer, create_store
         from assistants.language_mentor.memory import LearnerMemoryMiddleware, MEMORY_PATH, memory_namespace, save_learning_memory

@@ -18,6 +18,9 @@ from psycopg import AsyncConnection, sql
 from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
+from psycopg.types.json import Jsonb
+
+from core.message_deletion import _REMOVED, as_message_dicts, find_reply, scrub_messages
 
 SENSITIVE_KEYS = frozenset({'supabase_token', 'access_token', 'refresh_token', 'authorization',
                             'password', 'api_key', 'openai_api_key'})
@@ -62,7 +65,18 @@ def pg_conninfo() -> str:
 
 class PrivatePostgresSaver(AsyncPostgresSaver):
     async def aput(self, config, checkpoint, metadata, new_versions):
-        return await super().aput(redact_credentials(config), checkpoint, redact_credentials(metadata), new_versions)
+        thread_id = str(config['configurable']['thread_id'])
+        async with self._cursor() as cursor, cursor.connection.transaction():
+            deleted = await self._deleted_messages(cursor, thread_id)
+            cleaned = scrub_messages(checkpoint, deleted)
+            # Use the same connection so the identity guard and write commit together.
+            saver = AsyncPostgresSaver(cursor.connection, serde=self.serde)
+            return await saver.aput(redact_credentials(config), cleaned, redact_credentials(metadata), new_versions)
+
+    async def _deleted_messages(self, cursor, thread_id):
+        await cursor.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))', (thread_id,))
+        await cursor.execute('SELECT message_id FROM deleted_chat_messages WHERE thread_id = %s', (thread_id,))
+        return {row['message_id'] for row in await cursor.fetchall()}
 
     async def aput_writes(self, config, writes, task_id, task_path=''):
         run_id = (config.get('run_id') or (config.get('metadata') or {}).get('run_id')
@@ -70,9 +84,12 @@ class PrivatePostgresSaver(AsyncPostgresSaver):
         query = (self.UPSERT_CHECKPOINT_WRITES_SQL if all(channel in WRITES_IDX_MAP for channel, _ in writes)
                  else self.INSERT_CHECKPOINT_WRITES_SQL)
         cfg = config['configurable']
-        params = await asyncio.to_thread(self._dump_writes, cfg['thread_id'], cfg['checkpoint_ns'],
-                                         cfg['checkpoint_id'], task_id, task_path, writes)
         async with self._cursor() as cursor, cursor.connection.transaction():
+            deleted = await self._deleted_messages(cursor, str(cfg['thread_id']))
+            cleaned = [(channel, scrub_messages(value, deleted)) for channel, value in writes]
+            cleaned = [(channel, value) for channel, value in cleaned if value is not _REMOVED]
+            params = await asyncio.to_thread(self._dump_writes, cfg['thread_id'], cfg['checkpoint_ns'],
+                                             cfg['checkpoint_id'], task_id, task_path, cleaned)
             await cursor.executemany(query, params)
             if run_id and writes:
                 await cursor.execute('''INSERT INTO checkpoint_write_runs
@@ -80,9 +97,98 @@ class PrivatePostgresSaver(AsyncPostgresSaver):
                     ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id) DO UPDATE SET run_id = EXCLUDED.run_id''',
                     (cfg['thread_id'], cfg['checkpoint_ns'], cfg['checkpoint_id'], task_id, str(run_id)))
 
+    async def delete_reply(self, thread_id, message_id, owner, expected_checkpoint):
+        """Atomically scrub all saved copies and prevent stale writes restoring a reply."""
+        from fastapi import HTTPException
+
+        async with self._cursor() as cursor, cursor.connection.transaction():
+            await self._deleted_messages(cursor, thread_id)
+            await cursor.execute("SELECT checkpoint_id, metadata FROM checkpoints WHERE thread_id = %s AND checkpoint_ns = '' ORDER BY checkpoint_id DESC LIMIT 1", (thread_id,))
+            latest = await cursor.fetchone()
+            if not latest or (owner != 'local' and latest['metadata'].get('user_id') != owner):
+                raise HTTPException(404, '对话不存在或不可访问')
+            if latest['checkpoint_id'] != expected_checkpoint:
+                raise HTTPException(409, '对话已更新，请刷新后重试')
+            await cursor.execute("SELECT type, blob FROM checkpoint_blobs WHERE thread_id = %s AND checkpoint_ns = '' AND channel = 'messages' UNION ALL SELECT type, blob FROM checkpoint_writes WHERE thread_id = %s AND checkpoint_ns = '' AND channel = 'messages'", (thread_id, thread_id))
+            target = None
+            for row in await cursor.fetchall():
+                if row['blob'] is not None and row['type'] != 'empty':
+                    target = find_reply(self.serde.loads_typed((row['type'], bytes(row['blob']))), message_id)
+                    if target is not None:
+                        break
+            if target is None:
+                raise HTTPException(400, '只能删除不含工具调用的导师回复')
+            await self._scrub_messages(cursor, thread_id, {message_id})
+
+    async def delete_turn(self, thread_id, human_id, owner, expected_checkpoint):
+        """Remove one whole question/answer turn (including its tool cards) atomically."""
+        from fastapi import HTTPException
+
+        from assistants.language_mentor.turns import keep_other_turns
+
+        async with self._cursor() as cursor, cursor.connection.transaction():
+            await self._deleted_messages(cursor, thread_id)
+            await cursor.execute("SELECT checkpoint_id, metadata FROM checkpoints WHERE thread_id = %s AND checkpoint_ns = '' ORDER BY checkpoint_id DESC LIMIT 1", (thread_id,))
+            latest = await cursor.fetchone()
+            if not latest or (owner != 'local' and latest['metadata'].get('user_id') != owner):
+                raise HTTPException(404, '对话不存在或不可访问')
+            if latest['checkpoint_id'] != expected_checkpoint:
+                raise HTTPException(409, '对话已更新，请刷新后重试')
+            # Messages are saved either as full snapshots or as one small write per step, so rebuild the
+            # whole conversation (snapshots first, then writes in checkpoint order) before validating it.
+            await cursor.execute("SELECT type, blob FROM checkpoint_blobs WHERE thread_id = %s AND checkpoint_ns = '' AND channel = 'messages' ORDER BY version", (thread_id,))
+            saved = list(await cursor.fetchall())
+            await cursor.execute("SELECT type, blob FROM checkpoint_writes WHERE thread_id = %s AND checkpoint_ns = '' AND channel = 'messages' ORDER BY checkpoint_id, task_id, idx", (thread_id,))
+            saved += list(await cursor.fetchall())
+            history: dict[str, dict] = {}
+            for row in saved:
+                if row['blob'] is None or row['type'] == 'empty':
+                    continue
+                for message in as_message_dicts(self.serde.loads_typed((row['type'], bytes(row['blob'])))):
+                    if isinstance(message.get('id'), str) and message['id']:
+                        history[message['id']] = message  # a re-saved id keeps its original position
+            current = list(history.values())
+            if human_id not in history:
+                raise HTTPException(404, '找不到待删除的提问')
+            try:
+                retained = keep_other_turns(current, human_id)
+            except LookupError as exc:
+                raise HTTPException(404, str(exc)) from None
+            except ValueError as exc:
+                raise HTTPException(409, str(exc)) from None
+            kept_ids = {message['id'] for message in retained}
+            removed = {message['id'] for message in current if message['id'] not in kept_ids}
+            await self._scrub_messages(cursor, thread_id, removed)
+
+    async def _scrub_messages(self, cursor, thread_id, ids):
+        """Scrub every saved copy of the given message ids inside the caller's transaction."""
+        if not ids:
+            return
+        await cursor.execute('INSERT INTO deleted_chat_messages (thread_id, message_id) SELECT %s, unnest(%s::text[]) ON CONFLICT DO NOTHING', (thread_id, list(ids)))
+        # Checkpoint blobs and pending writes can both contain historical copies.
+        for table, keys in [('checkpoint_blobs', ['checkpoint_ns', 'channel', 'version']),
+                            ('checkpoint_writes', ['checkpoint_ns', 'checkpoint_id', 'task_id', 'idx'])]:
+            await cursor.execute(sql.SQL('SELECT * FROM {} WHERE thread_id = %s').format(sql.Identifier(table)), (thread_id,))
+            for saved in await cursor.fetchall():
+                if saved['blob'] is None or saved['type'] == 'empty':
+                    continue
+                original = self.serde.loads_typed((saved['type'], bytes(saved['blob'])))
+                cleaned = scrub_messages(original, ids)
+                where = sql.SQL(' AND ').join(sql.SQL('{} = %s').format(sql.Identifier(key)) for key in ['thread_id', *keys])
+                values = [thread_id, *(saved[key] for key in keys)]
+                if cleaned is _REMOVED:
+                    await cursor.execute(sql.SQL('DELETE FROM {} WHERE {}').format(sql.Identifier(table), where), values)
+                else:
+                    kind, blob = self.serde.dumps_typed(cleaned)
+                    await cursor.execute(sql.SQL('UPDATE {} SET type = %s, blob = %s WHERE {}').format(sql.Identifier(table), where), [kind, blob, *values])
+        await cursor.execute('SELECT checkpoint_ns, checkpoint_id, checkpoint FROM checkpoints WHERE thread_id = %s', (thread_id,))
+        for saved in await cursor.fetchall():
+            await cursor.execute('UPDATE checkpoints SET checkpoint = %s WHERE thread_id = %s AND checkpoint_ns = %s AND checkpoint_id = %s',
+                                 (Jsonb(scrub_messages(saved['checkpoint'], ids)), thread_id, saved['checkpoint_ns'], saved['checkpoint_id']))
+
     async def adelete_thread(self, thread_id):
         async with self._cursor() as cursor, cursor.connection.transaction():
-            for table in ['checkpoint_write_runs', 'checkpoint_writes', 'checkpoint_blobs', 'checkpoints']:
+            for table in ['deleted_chat_messages', 'checkpoint_write_runs', 'checkpoint_writes', 'checkpoint_blobs', 'checkpoints']:
                 await cursor.execute(sql.SQL('DELETE FROM {} WHERE thread_id = %s').format(sql.Identifier(table)), (str(thread_id),))
 
     async def adelete_for_runs(self, run_ids):
@@ -126,6 +232,9 @@ async def setup_database():
         await conn.execute('SELECT pg_advisory_lock(%s)', (713624899,))
         try:
             await PrivatePostgresSaver(conn).setup()
+            await conn.execute('''CREATE TABLE IF NOT EXISTS deleted_chat_messages (
+                thread_id TEXT NOT NULL, message_id TEXT NOT NULL,
+                PRIMARY KEY (thread_id, message_id))''')
             await AsyncPostgresStore(conn).setup()
             await conn.execute('''CREATE TABLE IF NOT EXISTS checkpoint_write_runs (
                 thread_id TEXT NOT NULL, checkpoint_ns TEXT NOT NULL, checkpoint_id TEXT NOT NULL,
