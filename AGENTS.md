@@ -36,6 +36,7 @@
 | `nature-of-language/` | **知识库内容源** | 40 篇语言学习 MD 笔记（语法/词汇/雅思），被 Agent 服务以只读方式检索 | **不改动**，仅被读取 |
 | `words-highlight-in-web/` | **用户数据生产端** | Chrome 插件：网页高亮 + 笔记/心得，数据双向同步到 Supabase | **不改动**，仅消费其数据 |
 | `language-learning-web/` | **用户前端** | React Web 应用，连 LangGraph Server + Supabase | 已建脚手架，测验/批改页待后端图谱 |
+| `translate-app/` | **macOS 翻译客户端** | Electron + React，中英双向翻译，Command+B 全局唤醒，调用中台 `translator` 图谱 | 独立客户端，模型与密钥保留在 Agent 中台 |
 
 ## 关键集成约定
 
