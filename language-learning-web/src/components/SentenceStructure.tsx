@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { createLibrary, defineComponent, Renderer } from '@openuidev/react-lang'
+import { BorderBeam } from 'border-beam'
 import { z } from 'zod/v4'
 import { BookOpen, CornerDownRight } from 'lucide-react'
 import { parseSentenceStructure, sentenceSegmentSchema } from '../lib/sentence-structure'
@@ -34,6 +35,7 @@ type Segment = z.infer<typeof sentenceSegmentSchema>
 
 function StructureCard({ summary, segmentsJson, explanationStepsJson, uncertainty }: z.infer<typeof cardSchema>) {
   const [selected, setSelected] = useState<number | null>(null)
+  const explanationId = useId()
   const segments = JSON.parse(segmentsJson) as Segment[]
   const explanationSteps = JSON.parse(explanationStepsJson) as ExplanationStep[]
   const legacyPoints = summary.match(/[^。]*。|[^。]+/g) ?? [summary]
@@ -44,7 +46,8 @@ function StructureCard({ summary, segmentsJson, explanationStepsJson, uncertaint
   const leadEnd = firstSentenceEnd >= 0 && firstSentenceEnd < 90 ? firstSentenceEnd + 1 : 80
   const lead = hasLongSummary ? `${summary.slice(0, leadEnd).trimEnd()}…` : summary
 
-  return <section aria-label="句子结构分析" className="w-full min-w-0 overflow-hidden rounded-2xl border border-primary/15 bg-card shadow-sm">
+  return <BorderBeam size="pulse-inner" colorVariant="ocean" theme="auto" strength={0.35} className="w-full min-w-0">
+    <section aria-label="句子结构分析" className="w-full min-w-0 overflow-hidden rounded-2xl border border-primary/15 bg-card shadow-sm">
     <header className="flex items-center gap-2 border-b bg-accent/40 px-4 py-3 font-semibold text-primary sm:px-5">
       <BookOpen className="size-4" aria-hidden="true" />句子结构分析
     </header>
@@ -55,21 +58,27 @@ function StructureCard({ summary, segmentsJson, explanationStepsJson, uncertaint
       </div>
       <div className="rounded-xl border bg-background p-4" aria-label="选择句子片段查看解释">
         <p className="mb-3 text-xs text-muted-foreground">点选彩色片段，看它的作用与判断依据</p>
-        <div className="flex flex-wrap items-baseline gap-y-2 leading-loose">
+        <div className="flex flex-wrap items-center gap-y-2 leading-loose">
           {segments.map((part, index) => <button key={index} type="button"
             aria-pressed={selected === index}
+            aria-controls={explanationId}
             aria-label={`${part.text.trim() || '空格'} · ${roleLabels[part.role]}`}
             onClick={() => setSelected(index)}
-            className={`rounded-md border-b-2 px-0.5 text-left text-base font-medium whitespace-pre-wrap transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${roleColors[part.role]} ${selected === index ? 'ring-2 ring-primary ring-offset-2' : 'hover:brightness-95'}`}>
+            className={`inline-flex min-h-11 items-center rounded-md border-b-2 px-1 text-left text-base font-medium whitespace-pre-wrap transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${roleColors[part.role]} ${selected === index ? 'ring-2 ring-primary ring-offset-2' : 'hover:brightness-95'}`}>
             {part.text}
           </button>)}
         </div>
+        <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 border-t pt-3" aria-label="句子成分图例">
+          {Array.from(new Set(segments.map((part) => part.role))).map((role) => <span key={role} className="text-xs text-foreground"><span aria-hidden="true" className={`mr-1 inline-block size-2 rounded-full ${roleColors[role]}`} />{roleLabels[role]}</span>)}
+        </div>
       </div>
-      {current && <div aria-live="polite" className="space-y-3 rounded-xl border border-primary/20 bg-accent/30 p-4 text-sm">
-        <div className="flex flex-wrap items-center gap-2 font-medium"><span>{current.text.trim()}</span><span className="rounded-full bg-card px-2 py-0.5 text-xs text-primary">{roleLabels[current.role]}</span></div>
-        {parent && <p className="flex items-start gap-1 text-muted-foreground"><CornerDownRight className="mt-0.5 size-4 shrink-0" aria-hidden="true" />关联片段：{parent.text.trim()}</p>}
-        <div><p className="mb-1 text-xs font-medium text-primary">为什么这样判断</p><p className="leading-relaxed">{current.reason}</p></div>
-      </div>}
+      <div id={explanationId} role="region" aria-label="片段解释" aria-live="polite" className="space-y-3 rounded-xl border border-primary/20 bg-accent/30 p-4 text-sm">
+        {current ? <>
+          <div className="flex flex-wrap items-center gap-2 font-medium"><span>{current.text.trim()}</span><span className="rounded-full bg-card px-2 py-0.5 text-xs text-primary">{roleLabels[current.role]}</span></div>
+          {parent && <p className="flex items-start gap-1 text-muted-foreground"><CornerDownRight className="mt-0.5 size-4 shrink-0" aria-hidden="true" />关联片段：{parent.text.trim()}</p>}
+          <div><p className="mb-1 text-xs font-medium text-primary">为什么这样判断</p><p className="leading-relaxed">{current.reason}</p></div>
+        </> : <p className="text-muted-foreground">点选句子中的一个片段，查看它修饰谁以及判断依据。</p>}
+      </div>
       {(hasLongSummary || explanationSteps.length > 0) && <details className="group rounded-xl border px-4 py-3 text-sm">
         <summary className="cursor-pointer font-medium text-primary marker:text-primary">展开完整解析</summary>
         {explanationSteps.length > 0 ? <div className="mt-4 space-y-3">
@@ -89,7 +98,8 @@ function StructureCard({ summary, segmentsJson, explanationStepsJson, uncertaint
         <p className="mt-3 leading-relaxed whitespace-pre-wrap text-foreground">{uncertainty}</p>
       </details>}
     </div>
-  </section>
+    </section>
+  </BorderBeam>
 }
 
 const Structure = defineComponent({

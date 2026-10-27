@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom/vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -56,6 +56,10 @@ import { HighlightsPage } from './HighlightsPage'
 import { NotesPage } from './NotesPage'
 import { QuizPage } from './QuizPage'
 import { WritingPage } from './WritingPage'
+
+beforeEach(() => {
+  vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
+})
 
 afterEach(() => {
   cleanup()

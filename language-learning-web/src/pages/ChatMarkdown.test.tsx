@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom/vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { LANGGRAPH_URL } from '../lib/config'
@@ -10,15 +10,20 @@ const chat = vi.hoisted(() => ({
   interrupts: [] as { id: string; value: unknown }[],
   messages: [] as { id: string; type: string; name?: string; tool_call_id?: string; content: string | { type: string; text?: string; image_url?: { url: string } }[] }[],
   threadId: null as string | null,
+  isLoading: false,
   client: { threads: { getState: vi.fn() } },
   respondAll: vi.fn(), submit: vi.fn(), stop: vi.fn(),
 }))
 vi.mock('../lib/auth', () => ({ useAuth: () => ({ user: { id: 'reader' }, accessToken: 'token', supabaseReady: true }) }))
-vi.mock('@langchain/react', () => ({ useStream: () => ({ ...chat, values: {}, isLoading: false, isThreadLoading: false }) }))
+vi.mock('@langchain/react', () => ({ useStream: () => ({ ...chat, values: {}, isThreadLoading: false }) }))
+vi.mock('thinking-orbs', () => ({ ThinkingOrb: ({ 'aria-label': label }: { 'aria-label': string }) => <span role="img" aria-label={label} /> }))
 
 import { ChatPage } from './ChatPage'
 
-beforeEach(() => { chat.submit.mockResolvedValue(undefined) })
+beforeEach(() => {
+  chat.submit.mockResolvedValue(undefined)
+  vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
+})
 
 function openApproval(count = 1) {
   chat.interrupts = [{ id: 'approval-1', value: {
@@ -39,6 +44,7 @@ afterEach(() => {
   chat.stop.mockReset()
   chat.client.threads.getState.mockReset()
   chat.threadId = null
+  chat.isLoading = false
   chat.interrupts = []
   chat.messages = []
   window.localStorage.clear()
@@ -141,6 +147,39 @@ describe('Mentor synonym tool', () => {
     ],
   }
 
+  it('shows an accessible thinking indicator while the mentor is responding', () => {
+    chat.isLoading = true
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    expect(screen.getByRole('status')).toHaveTextContent('导师思考中')
+    expect(screen.getByRole('img', { name: '导师正在思考' })).toBeInTheDocument()
+  })
+
+  it('keeps a visible composer glow in ordinary chat and strengthens it for either selected tool', async () => {
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    const input = screen.getByRole('textbox', { name: '输入问题' })
+    const form = input.closest('form')!
+    const beam = form.parentElement!
+    expect(beam).toHaveAttribute('data-active')
+    const ordinaryStrength = parseFloat(beam.style.getPropertyValue('--beam-strength'))
+    expect(ordinaryStrength).toBeGreaterThan(0)
+    expect(beam.style.boxShadow).not.toBe('')
+    const ordinaryHalo = beam.style.boxShadow
+    await userEvent.type(input, 'provide')
+    await userEvent.click(screen.getByRole('button', { name: '查找近义词' }))
+    expect(beam).toHaveAttribute('data-active')
+    expect(parseFloat(beam.style.getPropertyValue('--beam-strength'))).toBeGreaterThan(ordinaryStrength)
+    expect(beam.style.boxShadow).not.toBe(ordinaryHalo)
+    expect(input).toHaveValue('provide')
+    await userEvent.click(screen.getByRole('button', { name: '句子结构分析' }))
+    expect(beam).toHaveAttribute('data-active')
+    expect(parseFloat(beam.style.getPropertyValue('--beam-strength'))).toBeGreaterThan(ordinaryStrength)
+    expect(input).toHaveValue('provide')
+    await userEvent.click(screen.getByRole('button', { name: '句子结构分析' }))
+    expect(beam).toHaveAttribute('data-active')
+    expect(parseFloat(beam.style.getPropertyValue('--beam-strength'))).toBe(ordinaryStrength)
+    expect(beam.style.boxShadow).toBe(ordinaryHalo)
+  })
+
   it('selects the adjacent tool before sending and keeps modes mutually exclusive', async () => {
     render(<MemoryRouter><ChatPage /></MemoryRouter>)
     const sentence = screen.getByRole('button', { name: '句子结构分析' })
@@ -151,12 +190,26 @@ describe('Mentor synonym tool', () => {
     expect(sentence).toHaveAttribute('aria-pressed', 'false')
     expect(synonym).toHaveAttribute('aria-pressed', 'true')
     expect(chat.submit).not.toHaveBeenCalled()
+    expect(screen.getByRole('textbox', { name: '输入问题' })).toHaveFocus()
     await userEvent.type(screen.getByRole('textbox', { name: '输入问题' }), 'provide')
-    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    await userEvent.click(screen.getByRole('button', { name: '查找' }))
     expect(chat.submit).toHaveBeenCalledWith({ messages: [{ type: 'human', content: '查找近义词请求：\nprovide' }] }, {
       config: { configurable: { user_id: 'reader', supabase_token: 'token' } }, onError: expect.any(Function),
     })
     await waitFor(() => expect(synonym).toHaveAttribute('aria-pressed', 'false'))
+  })
+
+  it('explains a disabled send button with the current mode limit and preserves the draft when switching modes', async () => {
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '查找近义词' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '输入问题' }), { target: { value: 'a'.repeat(121) } })
+    expect(screen.getByRole('button', { name: '查找' })).toBeDisabled()
+    expect(screen.getByRole('textbox', { name: '输入问题' })).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByRole('alert')).toHaveTextContent('已输入 121/120 字')
+    await userEvent.click(screen.getByRole('button', { name: '句子结构分析' }))
+    expect(screen.getByRole('textbox', { name: '输入问题' })).toHaveValue('a'.repeat(121))
+    expect(screen.queryByText(/已输入 121\/120 字/)).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('句子结构分析')
   })
 
   it('restores matching alternatives and distinctions without showing the internal request', async () => {
@@ -170,7 +223,39 @@ describe('Mentor synonym tool', () => {
     expect(card).toHaveTextContent('offer')
     expect(card).toHaveTextContent('supply')
     expect(card).toHaveTextContent('主动提出，未必被接受。')
+    expect(card).toHaveTextContent('They provide shelter.')
+    // 卡片默认展示原表达的例句；点选其他表达后例句会切换，交互细节见 SynonymComparison 组件测试。
+    expect(screen.getByRole('region', { name: '选中词的例句' })).toHaveTextContent('They provide shelter.')
+    await userEvent.click(within(card).getByRole('button', { name: /offer/ }))
+    expect(screen.getByRole('region', { name: '选中词的例句' })).toHaveTextContent('She offered help.')
+    await userEvent.click(within(card).getByRole('button', { name: /supply/ }))
+    expect(screen.getByRole('region', { name: '选中词的例句' })).toHaveTextContent('They supply water.')
     expect(screen.queryByText(/查找近义词请求：/)).not.toBeInTheDocument()
+  })
+
+  it('cancels the tool without losing the word or submitting a request', async () => {
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '查找近义词' }))
+    const input = screen.getByRole('textbox', { name: '输入问题' })
+    await userEvent.type(input, 'take into account')
+    await userEvent.click(screen.getByRole('button', { name: '取消工具选择' }))
+    expect(input).toHaveValue('take into account')
+    expect(input).toHaveFocus()
+    expect(screen.getByRole('button', { name: '查找近义词' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('button', { name: '发送' })).toBeEnabled()
+    expect(chat.submit).not.toHaveBeenCalled()
+  })
+
+  it('preserves the synonym draft and selected mode after a failed request', async () => {
+    chat.submit.mockRejectedValueOnce(new Error('Offline'))
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '查找近义词' }))
+    await userEvent.type(screen.getByRole('textbox', { name: '输入问题' }), 'provide')
+    await userEvent.click(screen.getByRole('button', { name: '查找' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('发送失败')
+    expect(screen.getByRole('textbox', { name: '输入问题' })).toHaveValue('provide')
+    expect(screen.getByRole('button', { name: '查找近义词' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '查找' })).toBeEnabled()
   })
 
   it('does not display a comparison if it mismatches the submitted word', async () => {
@@ -201,6 +286,75 @@ describe('Mentor synonym tool', () => {
     const content = chat.submit.mock.calls[0][0].messages[0].content
     expect(content[0].text).not.toBe('查找近义词请求：\nprovide')
     expect(content[1].type).toBe('image_url')
+  })
+})
+
+describe('Deleting a whole mentor turn', () => {
+  beforeEach(() => {
+    chat.threadId = 'thread-1'
+    chat.messages = [
+      { id: 'question', type: 'human', content: 'Explain based on' },
+      { id: 'reply', type: 'ai', content: 'Unneeded summary' },
+    ]
+    chat.client.threads.getState.mockResolvedValue({ checkpoint: { checkpoint_id: 'checkpoint-1' } })
+  })
+
+  it('deletes the turn by its question identity with authorization and checkpoint', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const request = vi.fn().mockResolvedValue({ ok: true })
+    vi.stubGlobal('fetch', request)
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    await userEvent.click(screen.getAllByRole('button', { name: '删除这一轮问答' })[1])
+    await waitFor(() => expect(request).toHaveBeenCalledWith(`${LANGGRAPH_URL}/chat/thread-1/turns/question`, {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer token' },
+      body: JSON.stringify({ checkpoint_id: 'checkpoint-1' }),
+    }))
+    expect(chat.submit).not.toHaveBeenCalled()
+  })
+
+  it('keeps the reply when confirmation is cancelled', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    await userEvent.click(screen.getAllByRole('button', { name: '删除这一轮问答' })[1])
+    expect(chat.client.threads.getState).not.toHaveBeenCalled()
+    expect(screen.getByText('Unneeded summary')).toBeInTheDocument()
+  })
+
+  it('preserves the reply and reports failure instead of hiding it', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 409 }))
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    await userEvent.click(screen.getAllByRole('button', { name: '删除这一轮问答' })[1])
+    expect(await screen.findByRole('alert')).toHaveTextContent('内容仍保留')
+    expect(screen.getByText('Unneeded summary')).toBeInTheDocument()
+  })
+
+  it('puts a delete control on every bubble and card, all removing the same turn', async () => {
+    chat.messages = [
+      { id: 'question', type: 'human', content: '查找近义词请求：\nprovide' },
+      { id: 'card', type: 'tool', name: 'present_synonyms', content: JSON.stringify({
+        type: 'synonym_comparison', version: 1, source: 'provide',
+        shared_meaning: '都与提供有关。', source_distinction: '提供所需。', source_example: 'They provide help.',
+        alternatives: [{ term: 'offer', distinction: '主动提出。', example: 'She offered help.' }],
+      }) },
+      { id: 'reply', type: 'ai', content: '理解逻辑小结' },
+    ]
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const request = vi.fn().mockResolvedValue({ ok: true })
+    vi.stubGlobal('fetch', request)
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    // 用户提问、近义词卡片、导师回复各有一个垃圾桶。
+    const buttons = await screen.findAllByRole('button', { name: '删除这一轮问答' })
+    expect(buttons).toHaveLength(3)
+    // 点卡片上的垃圾桶也删除整轮（按提问标识），不会留下半轮对话。
+    await userEvent.click(buttons[1])
+    await waitFor(() => expect(request).toHaveBeenCalledWith(`${LANGGRAPH_URL}/chat/thread-1/turns/question`, expect.objectContaining({ method: 'DELETE' })))
+  })
+
+  it('disables deletion while a response is streaming', () => {
+    chat.isLoading = true
+    render(<MemoryRouter><ChatPage /></MemoryRouter>)
+    for (const button of screen.getAllByRole('button', { name: '删除这一轮问答' })) expect(button).toBeDisabled()
   })
 })
 

@@ -1,4 +1,6 @@
+import { useId, useState } from 'react'
 import { createLibrary, defineComponent, Renderer } from '@openuidev/react-lang'
+import { BorderBeam } from 'border-beam'
 import { z } from 'zod/v4'
 import { GitCompareArrows } from 'lucide-react'
 import { parseSynonymComparison } from '../lib/synonym-comparison'
@@ -15,34 +17,42 @@ type Alternative = { term: string; distinction: string; example: string }
 
 function SynonymCard({ source, sharedMeaning, sourceDistinction, sourceExample, alternativesJson }: z.infer<typeof cardSchema>) {
   const alternatives = JSON.parse(alternativesJson) as Alternative[]
-  return <section aria-label="近义词辨析" className="w-full min-w-0 overflow-hidden rounded-2xl border border-primary/15 bg-card shadow-sm">
-    <header className="flex items-center gap-2 border-b bg-accent/40 px-4 py-3 font-semibold text-primary sm:px-5">
-      <GitCompareArrows className="size-4" aria-hidden="true" />近义词辨析
-    </header>
-    <div className="space-y-5 p-4 sm:p-5">
-      <div className="rounded-xl bg-accent/40 px-4 py-3">
-        <p className="text-xs font-semibold text-primary">你输入的词或短语</p>
-        <p className="mt-1 text-xl font-semibold break-words text-foreground">{source}</p>
-        <p className="mt-2 text-sm leading-relaxed text-foreground">{sharedMeaning}</p>
-        <div className="mt-3 border-t border-primary/15 pt-3">
-          <p className="text-xs font-semibold text-primary">这个词的侧重点</p>
-          <p className="mt-1 text-sm leading-relaxed text-foreground">{sourceDistinction}</p>
-          <p className="mt-2 border-l-2 border-primary/40 pl-3 text-sm leading-relaxed break-words text-muted-foreground">{sourceExample}</p>
-        </div>
-      </div>
-      <div>
-        <h3 className="mb-3 text-sm font-semibold text-foreground">相近表达，有什么不同？</h3>
-        <ol className="grid gap-3 md:grid-cols-2">
-          {alternatives.map((item, index) => <li key={index} className="min-w-0 rounded-xl border bg-background p-4">
-            <p className="text-xs font-medium text-muted-foreground">相近表达 {index + 1}</p>
-            <h4 className="mt-1 text-lg font-semibold break-words text-primary">{item.term}</h4>
-            <p className="mt-2 text-sm leading-relaxed text-foreground">{item.distinction}</p>
-            <p className="mt-3 border-l-2 border-primary/40 pl-3 text-sm leading-relaxed break-words text-muted-foreground">{item.example}</p>
+  const entries = [{ term: source, distinction: sourceDistinction, example: sourceExample }, ...alternatives]
+  const [selected, setSelected] = useState(0)
+  const exampleId = useId()
+  const current = entries[selected] ?? entries[0]
+  return <BorderBeam size="pulse-inner" colorVariant="ocean" theme="auto" strength={0.35} className="w-full min-w-0">
+    <section aria-label="近义词辨析" className="w-full min-w-0 overflow-hidden rounded-2xl border border-primary/15 bg-card shadow-sm">
+      <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b bg-accent/40 px-4 py-3 sm:px-5">
+        <span className="flex items-center gap-1.5 text-sm font-semibold text-primary"><GitCompareArrows className="size-4 shrink-0" aria-hidden="true" />近义词辨析</span>
+        <h3 lang="en" className="min-w-0 text-lg font-semibold [overflow-wrap:anywhere]">{source}</h3>
+        <p className="w-full text-sm leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">{sharedMeaning}</p>
+      </header>
+      <div className="space-y-3 p-4 sm:p-5">
+        <p className="text-xs text-muted-foreground">点选一个表达，看它的例句</p>
+        <ol aria-label="近义表达对照" className="divide-y overflow-hidden rounded-xl border bg-background">
+          {entries.map((item, index) => <li key={item.term}>
+            <button type="button"
+              aria-pressed={selected === index}
+              aria-controls={exampleId}
+              aria-label={`${item.term} · ${index === 0 ? '原表达' : '相近表达'}`}
+              onClick={() => setSelected(index)}
+              className={`flex min-h-11 w-full items-start gap-3 px-3 py-3 text-left transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary ${selected === index ? 'bg-accent' : 'hover:bg-secondary/50'}`}>
+              <span className="min-w-0 flex-1">
+                <span lang="en" className={`block text-sm font-semibold [overflow-wrap:anywhere] ${selected === index ? 'text-primary' : ''}`}>{item.term}</span>
+                <span className="mt-1 block text-sm leading-relaxed text-foreground [overflow-wrap:anywhere]">{item.distinction}</span>
+              </span>
+              <span className={`mt-0.5 shrink-0 text-[11px] ${selected === index ? 'text-primary' : 'text-muted-foreground'}`}>{index === 0 ? '原表达' : '相近表达'}</span>
+            </button>
           </li>)}
         </ol>
+        <div id={exampleId} role="region" aria-label="选中词的例句" aria-live="polite" className="space-y-3 rounded-xl border border-primary/20 bg-accent/30 p-4 text-sm">
+          <div className="flex flex-wrap items-center gap-2 font-medium"><span lang="en" className="[overflow-wrap:anywhere]">{current.term}</span><span className="rounded-full bg-card px-2 py-0.5 text-xs text-primary">例句</span></div>
+          <p lang="en" className="border-l-2 border-primary/30 pl-3 leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">{current.example}</p>
+        </div>
       </div>
-    </div>
-  </section>
+    </section>
+  </BorderBeam>
 }
 
 const Synonyms = defineComponent({

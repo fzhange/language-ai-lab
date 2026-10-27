@@ -10,12 +10,13 @@ import { collectionWeekForDate, collectionWeeksInMonth, formatCollectionWeekRang
 import type { CollectionRow } from '../lib/supabase'
 
 const auth = vi.hoisted(() => ({ user: { id: 'reader' } as { id: string } | null, supabaseReady: true }))
-const db = vi.hoisted(() => ({ archive: vi.fn(), list: vi.fn(), create: vi.fn(), update: vi.fn(), remove: vi.fn(), saveSummary: vi.fn() }))
+const db = vi.hoisted(() => ({ archive: vi.fn(), list: vi.fn(), period: vi.fn(), create: vi.fn(), update: vi.fn(), remove: vi.fn(), saveSummary: vi.fn() }))
 
 vi.mock('../lib/auth', () => ({ useAuth: () => ({ ...auth, signOut: vi.fn() }) }))
 vi.mock('../lib/collections', () => ({
   listCollectionArchive: db.archive,
   listCollectionsForWeek: db.list,
+  listCollectionsForPeriod: db.period,
   createCollection: db.create,
   updateCollection: db.update,
   deleteCollection: db.remove,
@@ -49,6 +50,7 @@ beforeEach(() => {
   auth.supabaseReady = true
   db.archive.mockResolvedValue({ counts: { [currentWeek.key]: 1 }, summaries: { [currentWeek.key]: 'This week I understood proactive agents.' }, unassignedCount: 0 })
   db.list.mockResolvedValue([row])
+  db.period.mockResolvedValue([row])
   db.create.mockResolvedValue(row)
   db.update.mockResolvedValue(row)
   db.remove.mockResolvedValue(undefined)
@@ -110,6 +112,60 @@ describe('weekly collections', () => {
     await waitFor(() => expect(db.archive).toHaveBeenCalledWith(currentWeek.year, destinationMonth))
     expect(screen.queryByRole('dialog', { name: '选择月份' })).toBeNull()
     expect(screen.getByRole('button', { name: new RegExp(`选择月份，当前 ${currentWeek.year} 年 ${destinationMonth} 月`) })).toBeInTheDocument()
+  })
+
+  it('shows every week in the month and allows drilling into a week', async () => {
+    const otherWeek = monthWeeks.find((week) => week.key !== currentWeek.key)!
+    const otherRow = { ...row, id: 'two', week_key: otherWeek.key, content_doc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Earlier discovery' }] }] } }
+    db.period.mockResolvedValue([row, otherRow])
+    view()
+    await userEvent.click(screen.getByRole('button', { name: '按月' }))
+    await waitFor(() => expect(db.period).toHaveBeenCalledWith(currentWeek.year, currentWeek.month))
+    expect(await screen.findByText('Earlier discovery')).toBeInTheDocument()
+    expect(screen.getByText('Agent notes')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: `查看 ${otherWeek.key}` })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '编辑总结' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: `查看 ${otherWeek.key}` }))
+    await waitFor(() => expect(db.list).toHaveBeenCalledWith(otherWeek.key))
+    expect(screen.getByRole('heading', { name: otherWeek.key })).toBeInTheDocument()
+  })
+
+  it('groups the year by month and changes the year without including unassigned entries', async () => {
+    const otherMonth = currentWeek.month === 1 ? 2 : 1
+    const otherRow = { ...row, id: 'two', week_key: `${currentWeek.year}M${otherMonth}W1`, content_doc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Other month discovery' }] }] } }
+    db.period.mockResolvedValue([row, otherRow])
+    view()
+    await userEvent.click(screen.getByRole('button', { name: '按年' }))
+    await waitFor(() => expect(db.period).toHaveBeenCalledWith(currentWeek.year))
+    expect(await screen.findByText('Other month discovery')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: `查看 ${otherMonth} 月` })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: `查看 ${currentWeek.month} 月` })).toBeInTheDocument()
+    expect(screen.queryByText('This week I understood proactive agents.')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: '上一年' }))
+    await waitFor(() => expect(db.period).toHaveBeenCalledWith(currentWeek.year - 1))
+    expect(screen.getByRole('heading', { name: `${currentWeek.year - 1} 年` })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '按周' }))
+    expect(screen.getByRole('button', { name: '未分类 0' })).toBeInTheDocument()
+  })
+
+  it('keeps the destination year visible when a deletion from the old view finishes', async () => {
+    let finishDelete!: () => void
+    db.remove.mockImplementation(() => new Promise<void>((resolve) => { finishDelete = resolve }))
+    db.period.mockResolvedValue([{ ...row, id: 'other', content_doc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Keep this discovery' }] }] } }])
+    view()
+    await screen.findByText('Agent notes')
+    await userEvent.click(screen.getByRole('button', { name: '删除收藏' }))
+    await userEvent.click(screen.getByRole('button', { name: '确认删除' }))
+    await waitFor(() => expect(db.remove).toHaveBeenCalled())
+    await userEvent.click(screen.getByRole('button', { name: '按年' }))
+    await screen.findByRole('heading', { name: `${currentWeek.year} 年` })
+    db.list.mockResolvedValue([])
+    finishDelete()
+    // 删除完成后的刷新跟随当前视图（按年），不会再退回到旧的按周数据。
+    await waitFor(() => expect(db.period).toHaveBeenCalledTimes(2))
+    expect(db.period).toHaveBeenLastCalledWith(currentWeek.year)
+    expect(db.list).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('Keep this discovery')).toBeInTheDocument()
   })
 
   it('creates an article in the selected week and derives text from the document', async () => {

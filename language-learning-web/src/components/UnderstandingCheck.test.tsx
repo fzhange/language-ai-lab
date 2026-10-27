@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import '@testing-library/jest-dom/vitest'
@@ -11,7 +11,10 @@ import { SynonymComparison } from './SynonymComparison'
 import { parseSynonymComparison } from '../lib/synonym-comparison'
 
 const content = JSON.stringify({ type: 'understanding_check', version: 1, question: 'What does probabilistic mean?', options: ['Always wrong', 'Based on probability'], response: 'root = UnderstandingCheck("Q", ["A", "B"])' })
-afterEach(cleanup)
+beforeEach(() => {
+  vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
+})
+afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('OpenUI understanding check', () => {
   it('renders through OpenUI and submits a selected interpretation', async () => {
@@ -80,6 +83,15 @@ const synonyms = {
 }
 
 describe('OpenUI synonym comparison', () => {
+  it('highlights only the outside edge of the result without blocking word selection', async () => {
+    render(<SynonymComparison content={JSON.stringify(synonyms)} />)
+    const card = await screen.findByRole('region', { name: '近义词辨析' })
+    const beam = card.closest('[data-beam]')
+    expect(beam).toHaveAttribute('data-active')
+    await userEvent.click(screen.getByRole('button', { name: /offer/ }))
+    expect(screen.getByRole('region', { name: '选中词的例句' })).toHaveTextContent('She offered to help.')
+  })
+
   it('presents relevant words alongside their usage differences', async () => {
     render(<SynonymComparison content={JSON.stringify(synonyms)} />)
     const card = await screen.findByRole('region', { name: '近义词辨析' })
@@ -90,8 +102,18 @@ describe('OpenUI synonym comparison', () => {
     expect(card).toHaveTextContent('supply')
     expect(card).toHaveTextContent('主动提出，对方可选择接受或拒绝。')
     expect(card).toHaveTextContent('持续提供资源或货物，更强调供给。')
-    expect(card).toHaveTextContent('She offered to help.')
     expect(card).toHaveTextContent('都与提供有关，但主动提议和持续供应并不相同。')
+    expect(screen.getByRole('button', { name: /provide/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(card).toHaveTextContent('Schools provide meals.')
+    await userEvent.click(screen.getByRole('button', { name: /offer/ }))
+    expect(screen.getByRole('button', { name: /offer/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: /provide/ })).toHaveAttribute('aria-pressed', 'false')
+    expect(card).toHaveTextContent('She offered to help.')
+    await userEvent.click(screen.getByRole('button', { name: /supply/ }))
+    expect(card).toHaveTextContent('They supply water to the village.')
+    const example = screen.getByRole('region', { name: '选中词的例句' })
+    expect(example).toHaveAttribute('aria-live', 'polite')
+    expect(document.getElementById(screen.getByRole('button', { name: /supply/ }).getAttribute('aria-controls')!)).toBe(example)
   })
 
   it('rejects missing distinctions, duplicates and model-authored UI instructions', async () => {
@@ -106,6 +128,14 @@ describe('OpenUI synonym comparison', () => {
 })
 
 describe('OpenUI sentence structure', () => {
+  it('highlights only the outside edge of the analysis while preserving phrase interaction', async () => {
+    render(<SentenceStructure content={structure} />)
+    const card = await screen.findByRole('region', { name: '句子结构分析' })
+    expect(card.closest('[data-beam]')).toHaveAttribute('data-active')
+    await userEvent.click(screen.getByRole('button', { name: /happy/ }))
+    expect(screen.getByRole('region', { name: '片段解释' })).toHaveTextContent('表语')
+  })
+
   it('lets learners inspect the attachment and reasoning of an English predicative', async () => {
     render(<SentenceStructure content={structure} />)
     expect(await screen.findByText('is 连接主语和状态。')).toBeInTheDocument()
@@ -115,6 +145,9 @@ describe('OpenUI sentence structure', () => {
     expect(screen.getByText('描述 She 的状态，而非宾语。')).toBeInTheDocument()
     expect(screen.getByText(/关联片段：is/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /happy/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: /happy/ })).toHaveClass('min-h-11')
+    expect(document.getElementById(screen.getByRole('button', { name: /happy/ }).getAttribute('aria-controls')!)).toBe(screen.getByRole('region', { name: '片段解释' }))
+    expect(screen.getByRole('region', { name: '片段解释' })).toHaveTextContent('表语')
   })
 
   it('keeps long explanations behind disclosures while making the structure immediately visible', async () => {

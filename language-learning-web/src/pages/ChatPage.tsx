@@ -3,6 +3,8 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useStream } from '@langchain/react'
+import { BorderBeam } from 'border-beam'
+import { ThinkingOrb } from 'thinking-orbs'
 import { Dialog } from 'radix-ui'
 import { ArrowUp, BookOpen, CircleStop, GitCompareArrows, ImagePlus, LoaderCircle, MessageCircle, Plus, Sparkles, Trash2, X } from 'lucide-react'
 
@@ -225,8 +227,11 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
   const [imageError, setImageError] = useState('')
   const [recovering, setRecovering] = useState(false)
   const [sending, setSending] = useState(false)
+  const [deletingReply, setDeletingReply] = useState<string | null>(null)
+  const [replyDeleteError, setReplyDeleteError] = useState('')
   const [lastSentImage, setLastSentImage] = useState(false)
   const imageInputRef = useRef<HTMLInputElement>(null)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
   const imageSelection = useRef(0)
   const cancelled = useRef(false)
   const recoveryAttempt = useRef(0)
@@ -328,11 +333,20 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
     }
   }
 
+  const toolLimit = toolMode === 'sentence' ? 1600 : 120
+  const toolLength = toolMode === 'sentence' ? input.length : input.trim().length
+  const overLimit = toolMode !== null && toolLength > toolLimit
+
+  const selectTool = (mode: 'sentence' | 'synonym') => {
+    setToolMode((current) => current === mode ? null : mode)
+    composerRef.current?.focus()
+  }
+
   const send = (e: FormEvent) => {
     e.preventDefault()
     const text = input.trim()
-    if ((!text && !image) || imageLoading || stream.isLoading || stream.isThreadLoading || hasPendingApproval || sending) return
-    if (toolMode && (image || input.length > (toolMode === 'sentence' ? 1600 : 120))) return
+    if ((!text && !image) || imageLoading || stream.isLoading || stream.isThreadLoading || hasPendingApproval || sending || deletingReply) return
+    if (toolMode && (image || overLimit)) return
     const ordinaryText = text.startsWith('句子结构分析请求：\n') ? `用户原文（非句子结构工具请求）：\n${text}`
       : text.startsWith(SYNONYM_REQUEST_PREFIX) ? `用户原文（非工具请求）：\n${text}` : text
     const content = toolMode === 'sentence' ? sentenceRequest(input) : toolMode === 'synonym' ? synonymRequest(text) : image ? [
@@ -379,7 +393,7 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
   )
 
   async function answerCheck(checkId: string, question: string, answer: string) {
-    if (sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval) throw new Error('Mentor is busy')
+    if (sending || deletingReply || stream.isLoading || stream.isThreadLoading || hasPendingApproval) throw new Error('Mentor is busy')
     setSending(true)
     let failed = false
     try {
@@ -389,6 +403,42 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
       })
       if (failed) throw new Error('Answer submission failed')
     } finally { setSending(false) }
+  }
+
+  // 删除整轮问答：导师回复与其上方的近义词/句子结构卡片属于同一次提问，只删回复会留下孤立卡片。
+  async function deleteTurn(humanId: string) {
+    const id = stream.threadId ?? threadId
+    if (!id || deletingReply || sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval) return
+    if (!window.confirm('确定永久删除这一轮问答吗？你提的问题、导师回复及相关卡片都会移除，此操作无法撤销。')) return
+    setDeletingReply(humanId)
+    setReplyDeleteError('')
+    try {
+      const state = await stream.client.threads.getState(id)
+      const response = await fetch(`${LANGGRAPH_URL.replace(/\/$/, '')}/chat/${encodeURIComponent(id)}/turns/${encodeURIComponent(humanId)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
+        body: JSON.stringify({ checkpoint_id: state.checkpoint?.checkpoint_id }),
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      onRecoverThread(id)
+    } catch {
+      setReplyDeleteError('删除这一轮问答失败，内容仍保留。请刷新对话后重试。')
+    } finally { setDeletingReply(null) }
+  }
+
+  // 每个气泡/卡片都能删除它所属的这一轮：用户提问取自身，其余取往上最近的提问。
+  // 垃圾桶放在气泡/卡片之外的一侧，不占用气泡内部空间，也不会被气泡底色吞掉。
+  function turnTrash(index: number, className = 'shrink-0 self-end pb-1') {
+    const own = visibleMessages[index]
+    const questionId = own?.type === 'human' ? own.id : [...visibleMessages.slice(0, index)].reverse().find((item) => item.type === 'human')?.id
+    if (!questionId) return null
+    return <div className={className}>
+      <Button type="button" variant="ghost" size="icon" aria-label="删除这一轮问答" title="删除这一轮问答（永久，无法撤销）"
+        disabled={(!stream.threadId && !threadId) || deletingReply !== null || sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval}
+        onClick={() => void deleteTurn(questionId)} className="size-8 text-muted-foreground hover:text-destructive">
+        {deletingReply === questionId ? <LoaderCircle className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+      </Button>
+    </div>
   }
 
   return (
@@ -402,6 +452,7 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
         <Badge variant="outline" className="hidden border-primary/20 bg-accent/50 text-primary sm:inline-flex"><Sparkles />AI 导师</Badge>
       </div>
       <TodosPanel values={stream.values} />
+      {replyDeleteError && <p role="alert" className="text-sm text-destructive">{replyDeleteError}</p>}
 
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto py-2">
         {stream.isThreadLoading && <p role="status" className="text-sm text-muted-foreground">正在加载对话…</p>}
@@ -430,10 +481,13 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
             if (name === 'present_understanding_check') {
               const checkId = (msg as { tool_call_id?: string }).tool_call_id ?? msg.id
               if (!checkId) return null
-              return <div key={msg.id ?? i} className="mx-2 min-w-0 max-w-2xl sm:mx-8">
-                <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">正在加载理解检查…</p>}><UnderstandingCheck content={text} disabled={sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval}
-                  submittedAnswer={restoredUnderstandingAnswer(stream.messages, checkId)}
-                  onAnswer={(question, answer) => answerCheck(checkId, question, answer)} /></Suspense>
+              return <div key={msg.id ?? i} className="mx-2 flex min-w-0 items-start gap-1 sm:mx-8">
+                <div className="min-w-0 max-w-2xl flex-1">
+                  <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">正在加载理解检查…</p>}><UnderstandingCheck content={text} disabled={sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval}
+                    submittedAnswer={restoredUnderstandingAnswer(stream.messages, checkId)}
+                    onAnswer={(question, answer) => answerCheck(checkId, question, answer)} /></Suspense>
+                </div>
+                {turnTrash(i)}
               </div>
             }
             if (name === 'present_sentence_structure') {
@@ -441,26 +495,32 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
               const source = requested ? sentenceRequestText(textOf(requested.content)) : undefined
               const structure = parseSentenceStructure(text)
               if (source !== undefined && structure?.sentence === source) {
-                return <div key={msg.id ?? i} className="w-full min-w-0 px-2 sm:px-8">
-                  <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">正在加载句子结构…</p>}>
-                    <SentenceStructure content={text} />
-                  </Suspense>
+                return <div key={msg.id ?? i} className="flex w-full min-w-0 items-start gap-1 px-2 sm:px-8">
+                  <div className="min-w-0 flex-1">
+                    <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">正在加载句子结构…</p>}>
+                      <SentenceStructure content={text} />
+                    </Suspense>
+                  </div>
+                  {turnTrash(i)}
                 </div>
               }
-              return <p key={msg.id ?? i} role="status" className="mx-2 text-sm text-muted-foreground sm:mx-8">结构图暂时无法显示，请让导师用文字解释这句话。</p>
+              return <div key={msg.id ?? i} className="mx-2 flex items-center gap-1 sm:mx-8"><p role="status" className="min-w-0 flex-1 text-sm text-muted-foreground">结构图暂时无法显示，请让导师用文字解释这句话。</p>{turnTrash(i)}</div>
             }
             if (name === 'present_synonyms') {
               const requested = visibleMessages.slice(0, i).reverse().find((item) => item.type === 'human')
               const source = requested ? synonymRequestText(textOf(requested.content)) : undefined
               const comparison = parseSynonymComparison(text)
               if (source !== undefined && comparison?.source === source) {
-                return <div key={msg.id ?? i} className="w-full min-w-0 px-2 sm:px-8">
-                  <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">正在加载近义词辨析…</p>}>
-                    <SynonymComparison content={text} />
-                  </Suspense>
+                return <div key={msg.id ?? i} className="flex w-full min-w-0 items-start gap-1 px-2 sm:px-8">
+                  <div className="min-w-0 flex-1">
+                    <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">正在加载近义词辨析…</p>}>
+                      <SynonymComparison content={text} />
+                    </Suspense>
+                  </div>
+                  {turnTrash(i)}
                 </div>
               }
-              return <p key={msg.id ?? i} role="status" className="mx-2 text-sm text-muted-foreground sm:mx-8">近义词卡片暂时无法显示，请让导师用文字解释。</p>
+              return <div key={msg.id ?? i} className="mx-2 flex items-center gap-1 sm:mx-8"><p role="status" className="min-w-0 flex-1 text-sm text-muted-foreground">近义词卡片暂时无法显示，请让导师用文字解释。</p>{turnTrash(i)}</div>
             }
             if (name === 'create_markdown' && text.includes('"markdown_artifact"')) {
               return <MarkdownArtifact key={msg.id ?? i} result={text} accessToken={accessToken} />
@@ -482,6 +542,7 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
           const messageImage = isHuman ? imageOf(msg.content) : null
           const toolCalls = (msg as { tool_calls?: { name?: string; args?: unknown }[] })
             .tool_calls
+          // 本轮提问：往上找最近的一条用户消息；整轮删除以它为准。
 
           // AI 消息无正文、只有工具调用：渲染成一行过程状态，不再留空气泡
           if (!isHuman && !text.trim() && toolCalls && toolCalls.length > 0) {
@@ -500,7 +561,8 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
           if (!text.trim() && !messageImage && !(toolCalls && toolCalls.length > 0)) return null
 
           return (
-            <div key={msg.id ?? i} className={`flex ${isHuman ? 'justify-end' : 'justify-start'}`}>
+            <div key={msg.id ?? i} className={`flex items-end gap-1 ${isHuman ? 'justify-end' : 'justify-start'}`}>
+              {isHuman && !(toolCalls && toolCalls.length > 0) && msg.id && turnTrash(i)}
               <div
                 className={`max-w-[95%] rounded-xl px-4 py-3 text-base leading-relaxed sm:max-w-[85%] ${
                   isHuman
@@ -524,6 +586,7 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
                   <MarkdownView>{text}</MarkdownView>
                 )}
               </div>
+              {!isHuman && !(toolCalls && toolCalls.length > 0) && msg.id && turnTrash(i)}
             </div>
           )
         })}
@@ -531,7 +594,7 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
           onRespond={(responses) => stream.respondAll(responses, {
             config: { configurable: { user_id: userId ?? undefined, supabase_token: accessToken ?? undefined } },
           })} />
-        {stream.isLoading && <p className="flex items-center gap-2 text-xs text-muted-foreground"><span className="size-2 animate-pulse rounded-full bg-primary" />导师思考中…</p>}
+        {stream.isLoading && <p role="status" className="mx-2 flex items-center gap-2 text-xs text-muted-foreground sm:mx-8"><ThinkingOrb state="working" size={20} aria-label="导师正在思考" />导师思考中…</p>}
         {stream.error != null && !recovering && (
           <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
             {lastSentImage ? '导师回复未能完成。图片和问题已保留，请重试。' : `连接出错，请确认服务已在 ${LANGGRAPH_URL} 启动。`}
@@ -540,7 +603,12 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
         <div ref={bottomRef} />
       </div>
 
-      <form onSubmit={send} className="shrink-0 space-y-2 rounded-xl border bg-card p-3 shadow-sm">
+      <BorderBeam size="pulse-inner" colorVariant="ocean" theme="light" staticColors strength={toolMode ? 1 : 0.8} brightness={1.55} duration={3.6}
+        style={{ boxShadow: toolMode
+          ? '0 0 22px -5px rgba(89, 94, 232, 0.36), 0 0 42px -20px rgba(79, 137, 245, 0.4)'
+          : '0 0 18px -6px rgba(89, 94, 232, 0.27), 0 0 36px -18px rgba(79, 137, 245, 0.32)' }}
+        className="shrink-0 min-w-0 motion-safe:transition-shadow motion-safe:duration-700">
+        <form onSubmit={send} className="space-y-2 rounded-xl border bg-card p-3 shadow-sm">
         {image && (
           <Dialog.Root>
             <div className="relative w-fit">
@@ -579,14 +647,19 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
         <div className="flex items-end gap-2">
           <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp" aria-label="选择图片"
             disabled={Boolean(toolMode) || sending || stream.isLoading} className="sr-only" onChange={(e: ChangeEvent<HTMLInputElement>) => selectImage(e.target.files?.[0])} />
-          <Button type="button" variant="ghost" size="icon" aria-label="添加图片" title="添加图片（也可粘贴截图）"
-            disabled={Boolean(toolMode) || sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval}
-            onClick={() => imageInputRef.current?.click()} className="mb-1 shrink-0">
-            <ImagePlus className="size-5" />
-          </Button>
+          {!toolMode && (
+            <Button type="button" variant="ghost" size="icon" aria-label="添加图片" title="添加图片（也可粘贴截图）"
+              disabled={sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval}
+              onClick={() => imageInputRef.current?.click()} className="mb-1 shrink-0">
+              <ImagePlus className="size-5" />
+            </Button>
+          )}
           <Textarea
+            ref={composerRef}
             aria-label="输入问题"
-            disabled={sending || stream.isLoading}
+            aria-describedby={toolMode ? 'mentor-tool-status' : undefined}
+            aria-invalid={overLimit || undefined}
+            disabled={sending || deletingReply !== null || stream.isLoading}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onPaste={toolMode ? undefined : pasteImage}
@@ -596,35 +669,46 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
                 e.currentTarget.form?.requestSubmit()
               }
             }}
-            rows={2}
-            placeholder={toolMode === 'sentence' ? '粘贴一条英文句子，发送后分析主干与修饰关系…' : toolMode === 'synonym' ? '输入一个英文单词或短语，例如 provide…' : '输入你的问题或粘贴截图…（Enter 发送，Shift + Enter 换行）'}
-            className="max-h-40 min-w-0 flex-1 resize-y border-0 bg-transparent shadow-none focus-visible:border-transparent focus-visible:ring-0"
+            rows={toolMode === 'synonym' ? 1 : 2}
+            placeholder={toolMode === 'sentence' ? '粘贴一条英文句子，发送后分析主干与修饰关系…' : toolMode === 'synonym' ? '英文单词或短语，如 provide、take into account' : '输入你的问题或粘贴截图…（Enter 发送，Shift + Enter 换行）'}
+            className={`max-h-40 min-w-0 flex-1 border-0 bg-transparent shadow-none focus-visible:border-transparent focus-visible:ring-0 ${toolMode === 'synonym' ? 'min-h-12 resize-none' : 'resize-y'}`}
           />
           {stream.isLoading || sending ? (
             <Button variant="outline" type="button" onClick={() => { cancelled.current = true; void stream.stop() }} className="mb-1">
               <CircleStop />停止
             </Button>
           ) : (
-            <Button type="submit" disabled={(!input.trim() && !image) || (toolMode === 'sentence' && input.length > 1600) || (toolMode === 'synonym' && input.trim().length > 120) || imageLoading || sending || stream.isThreadLoading || hasPendingApproval} className="mb-1">
-              <ArrowUp />发送
+            <Button type="submit" disabled={(!input.trim() && !image) || overLimit || imageLoading || sending || deletingReply !== null || stream.isThreadLoading || hasPendingApproval} className="mb-1 shrink-0">
+              {toolMode === 'synonym' ? <GitCompareArrows /> : <ArrowUp />}{toolMode === 'synonym' ? '查找' : '发送'}
             </Button>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2 border-t pt-2">
           <Button type="button" size="sm" variant={toolMode === 'sentence' ? 'secondary' : 'ghost'} aria-pressed={toolMode === 'sentence'}
             disabled={Boolean(image) || imageLoading || sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval}
-            onClick={() => setToolMode((current) => current === 'sentence' ? null : 'sentence')} className="h-8 rounded-full text-xs">
+            onClick={() => selectTool('sentence')} className={`min-h-10 rounded-full text-xs ${toolMode === 'sentence' ? 'ring-1 ring-primary/30' : ''}`}>
             <BookOpen className="size-3.5" />句子结构分析
           </Button>
           <Button type="button" size="sm" variant={toolMode === 'synonym' ? 'secondary' : 'ghost'} aria-pressed={toolMode === 'synonym'}
             disabled={Boolean(image) || imageLoading || sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval}
-            onClick={() => setToolMode((current) => current === 'synonym' ? null : 'synonym')} className="h-8 rounded-full text-xs">
+            onClick={() => selectTool('synonym')} className={`min-h-10 rounded-full text-xs ${toolMode === 'synonym' ? 'ring-1 ring-primary/30' : ''}`}>
             <GitCompareArrows className="size-3.5" />查找近义词
           </Button>
-          {toolMode === 'sentence' && <span className="text-xs text-muted-foreground">选中后发送一句英文 · 最多 1600 字</span>}
-          {toolMode === 'synonym' && <span className="text-xs text-muted-foreground">选中后输入一个英文词或短语 · 最多 120 字</span>}
+          {toolMode && <>
+            <span role="status" className="sr-only">{toolMode === 'sentence' ? '句子结构分析' : '查找近义词'}</span>
+            <span id="mentor-tool-status" role={overLimit ? 'alert' : undefined}
+              className={`ml-auto text-xs tabular-nums ${overLimit ? 'font-medium text-destructive' : 'text-muted-foreground'}`}>
+              {overLimit ? `已输入 ${toolLength}/${toolLimit} 字，超出限制，请缩短后发送` : `${toolLength}/${toolLimit}`}
+            </span>
+            <Button type="button" variant="ghost" size="icon" aria-label="取消工具选择" title="取消工具选择"
+              disabled={sending || stream.isLoading}
+              onClick={() => { setToolMode(null); composerRef.current?.focus() }} className="size-8 shrink-0">
+              <X className="size-3.5" />
+            </Button>
+          </>}
         </div>
-      </form>
+        </form>
+      </BorderBeam>
     </div>
   )
 }

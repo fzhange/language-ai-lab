@@ -103,6 +103,31 @@ export async function listCollectionArchive(year: number, month: number): Promis
   }
 }
 
+export async function listCollectionsForPeriod(year: number, month?: number): Promise<CollectionRow[]> {
+  if (!Number.isInteger(year) || year < 1 || year > 9999) throw new Error('收藏年份无效。')
+  const prefix = month === undefined ? `${year}M%` : monthPrefix(year, month)
+  try {
+    const rows: CollectionRow[] = []
+    const pageSize = 1000
+    for (let start = 0; ; start += pageSize) {
+      const { data, error } = await client().from('whw_collections')
+        .select(COLLECTION_COLUMNS)
+        .like('week_key', prefix)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(start, start + pageSize - 1)
+      if (error) throw error
+      const page = (data ?? []) as CollectionRow[]
+      rows.push(...page)
+      if (page.length < pageSize) return rows
+    }
+  } catch (cause) {
+    if (!isMissingWeekSchema(cause)) throw cause
+    const prefixWithoutWildcard = prefix.slice(0, -1)
+    return (await listLegacyCollections()).filter((row) => row.week_key?.startsWith(prefixWithoutWildcard))
+  }
+}
+
 export async function listCollectionsForWeek(weekKey: string | null, size = 100): Promise<CollectionRow[]> {
   if (weekKey !== null && !isCollectionWeekKey(weekKey)) throw new Error('收藏周分类无效。')
   try {

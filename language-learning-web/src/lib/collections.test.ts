@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { createCollection, deleteCollection, listCollectionArchive, listCollectionsForWeek, saveCollectionWeekSummary, updateCollection } from './collections'
+import { createCollection, deleteCollection, listCollectionArchive, listCollectionsForPeriod, listCollectionsForWeek, saveCollectionWeekSummary, updateCollection } from './collections'
 
 const db = vi.hoisted(() => ({
   results: [] as { data?: unknown; error?: Error | null; count?: number | null }[],
@@ -51,6 +51,28 @@ describe('collection persistence', () => {
     await expect(listCollectionsForWeek('2026M10W3')).resolves.toEqual([row])
     expect(db.calls).toContainEqual(['eq', ['week_key', '2026M10W3']])
     expect(db.calls).toContainEqual(['order', ['created_at', { ascending: false }]])
+  })
+
+  it('loads all month and year articles by week category without silently limiting to one page', async () => {
+    db.results.push({ data: [row] })
+    await expect(listCollectionsForPeriod(2026, 10)).resolves.toEqual([row])
+    expect(db.calls).toContainEqual(['like', ['week_key', '2026M10W%']])
+    expect(db.calls).toContainEqual(['order', ['created_at', { ascending: false }]])
+    expect(db.calls).toContainEqual(['range', [0, 999]])
+
+    db.calls.length = 0
+    db.results.push({ data: Array(1000).fill(row) }, { data: [{ ...row, id: 'last', week_key: '2026M1W1' }] })
+    const annual = await listCollectionsForPeriod(2026)
+    expect(annual).toHaveLength(1001)
+    expect(annual.at(-1)?.id).toBe('last')
+    expect(db.calls).toContainEqual(['like', ['week_key', '2026M%']])
+    expect(db.calls).toContainEqual(['range', [1000, 1999]])
+  })
+
+  it('rejects invalid month and year archive periods', async () => {
+    await expect(listCollectionsForPeriod(2026, 13)).rejects.toThrow('月份无效')
+    await expect(listCollectionsForPeriod(0)).rejects.toThrow('年份无效')
+    expect(db.calls).toEqual([])
   })
 
   it('creates the category before inserting an article into it', async () => {
