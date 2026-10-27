@@ -26,6 +26,13 @@
 | `language-mentor` | `assistants/language_mentor/agent.py:make_language_mentor` | deep agent（对话，SSE 流式） | 英语学习导师：知识库（nature-of-language）只读检索 + 用户高亮查询 + 语言讲解 |
 | `writing-coach` | `assistants/language_mentor/study.py:make_writing_coach_graph` | 一次性图谱（`/runs/wait`） | 雅思写作批改（TR/CC/LR/GRA 四维度，中文解释英文示范） |
 | `vocab-quiz` | `assistants/language_mentor/study.py:make_vocab_quiz_graph` | 一次性图谱（取数节点 + 生成节点） | 基于用户 Supabase 高亮出题/批改（同会话历史第二次调用进入批改模式） |
+| `translator` | `assistants/translator/agent.py:make_translation_graph` | 一次性图谱（`/runs/wait`） | 中英双向翻译，结构化输入 text/source_language/target_language，返回 translation；供 translate-app 使用 |
+| `translation-mentor` | `assistants/translator/mentor.py:make_translation_mentor_graph` | 无状态流式图谱（`/runs/stream`） | 译文 + 语境/词句拆解/用法差异/例句；可指定 focus 词；messages-tuple 流式、最终 explanation 为 Markdown |
+
+`translation-mentor` 追问沿用原文与方向，客户端每次传 `follow_up` + 有界的
+`history`（assistant/user 交替、最后为完整回答），不创建持久化业务会话。
+该图谱 `checkpointer=False`；客户端无状态 run 设 `on_completion=delete`。
+原文仍为不可信学习素材，追问作为用户问题处理，不误判为新的待翻译文本。
 
 ## 开发约定
 

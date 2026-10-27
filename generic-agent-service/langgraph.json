@@ -7,7 +7,9 @@
     "highlight-report": "./assistants/highlight_buddy/study.py:make_report_graph",
     "language-mentor": "./assistants/language_mentor/agent.py:make_language_mentor",
     "writing-coach": "./assistants/language_mentor/study.py:make_writing_coach_graph",
-    "vocab-quiz": "./assistants/language_mentor/study.py:make_vocab_quiz_graph"
+    "vocab-quiz": "./assistants/language_mentor/study.py:make_vocab_quiz_graph",
+    "translator": "./assistants/translator/agent.py:make_translation_graph",
+    "translation-mentor": "./assistants/translator/mentor.py:make_translation_mentor_graph"
   },
   "http": {
     "app": "./notes_http.py:app"

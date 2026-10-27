@@ -10,6 +10,7 @@ from typing import Any
 # ---- 各来源的标识常量（所有引用处统一从这里取，禁止散落硬编码） ----
 HIGHLIGHT_BUDDY = "highlight-buddy"
 LANGUAGE_MENTOR = "language-mentor"
+TRANSLATOR = "translator"
 BACKENDS_DEMO = "backends-demo"
 
 
