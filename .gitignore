@@ -156,3 +156,8 @@ __pycache__/
 
 # Managed agent runtime artifacts
 .mda/
+
+# Editor and local tooling artifacts
+.idea/
+.playwright-cli/
+.DS_Store
