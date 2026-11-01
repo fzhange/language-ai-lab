@@ -2,17 +2,32 @@
 
 import { useState } from 'react'
 import { ArrowRight, PenLine, Sparkles } from 'lucide-react'
+import type { JSONContent } from '@tiptap/core'
 
 import { MarkdownView } from '../components/MarkdownView'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { Card } from '../components/ui/card'
 import { Input } from '../components/ui/input'
-import { Textarea } from '../components/ui/textarea'
+import { SimpleEditor } from '../components/ui/simple-editor'
+import { COLLECTION_HIGHLIGHT_COLORS, COLLECTION_TEXT_COLORS, collectionPlainText, parseCollectionDoc } from '../lib/collection-document'
 import { runOnce } from '../lib/agent'
 import { useAuth } from '../lib/auth'
 
 const ASSISTANT_ID = 'writing-coach'
+
+const textColors = [
+  { name: '墨色', color: COLLECTION_TEXT_COLORS[4] },
+  { name: '蓝色', color: COLLECTION_TEXT_COLORS[5] },
+  { name: '莓红', color: COLLECTION_TEXT_COLORS[6] },
+  { name: '绿色', color: COLLECTION_TEXT_COLORS[7] },
+]
+const backgroundColors = [
+  { name: '黄色', color: COLLECTION_HIGHLIGHT_COLORS[0] },
+  { name: '蓝色', color: COLLECTION_HIGHLIGHT_COLORS[1] },
+  { name: '粉色', color: COLLECTION_HIGHLIGHT_COLORS[2] },
+  { name: '绿色', color: COLLECTION_HIGHLIGHT_COLORS[3] },
+]
 
 export function WritingPage() {
   const { user, accessToken } = useAuth()
@@ -21,6 +36,12 @@ export function WritingPage() {
   const [result, setResult] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
+  // 富文本编辑器产出 TipTap JSON；提交与词数统计都基于从中解析出的纯文本。
+  function handleEditorChange(content: JSONContent) {
+    const doc = parseCollectionDoc(content)
+    setEssay(doc ? collectionPlainText(doc) : '')
+  }
 
   const submit = async () => {
     if (!essay.trim() || loading) return
@@ -65,8 +86,18 @@ export function WritingPage() {
           <Input id="writing-topic" value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="输入作文题目" />
         </div>
         <div className="space-y-2">
-          <label htmlFor="writing-essay" className="text-base font-medium">你的作文</label>
-          <Textarea id="writing-essay" value={essay} onChange={(e) => setEssay(e.target.value)} rows={12} placeholder="粘贴你的英文作文…" className="leading-relaxed" />
+          <span className="text-base font-medium">你的作文</span>
+          <div className="flex h-[32rem] flex-col">
+            <SimpleEditor
+              label="你的作文"
+              initialContent={null}
+              textColors={textColors}
+              backgroundColors={backgroundColors}
+              placeholder="粘贴或输入你的英文作文…"
+              disabled={loading}
+              onChange={handleEditorChange}
+            />
+          </div>
         </div>
         <div className="flex items-center justify-between gap-3">
           <span className="text-sm text-muted-foreground">{wordCount} 词</span>
