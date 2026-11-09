@@ -8,7 +8,7 @@ from starlette.requests import Request
 async def artifact_owner(token: str | None) -> str:
     if not os.environ.get('SUPABASE_URL') and not os.environ.get('SUPABASE_ANON_KEY'):
         return 'local'
-    from exam_http import _verified_user
+    from http_api.exam import _verified_user
 
     header = f'Bearer {token}' if token else ''
     request = Request({'type': 'http', 'method': 'GET', 'path': '/artifacts',

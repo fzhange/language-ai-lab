@@ -1,9 +1,7 @@
-"""nature-of-language 笔记库的只读 HTTP 接口（给前端笔记阅读页用）。
+"""nature-of-language 笔记库的只读 HTTP 路由（给前端笔记阅读页用）。
 
-在 langgraph.json 中通过 ``http.app`` 挂载到 LangGraph Server：
-
-- ``GET /notes``        -> [{"path": "...", "title": "..."}] 笔记清单
-- ``GET /notes/{path}`` -> text/markdown 原文（path 为清单返回的相对路径）
+- GET /notes        -> [{"path": "...", "title": "..."}] 笔记清单
+- GET /notes/{path} -> text/markdown 原文（path 为清单返回的相对路径）
 
 安全约定与 ``assistants/language_mentor/tools/knowledge.py`` 一致：
 只读、仅限 .md、路径必须落在笔记库根目录内（防目录穿越）。
@@ -11,32 +9,12 @@
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import PlainTextResponse
 
 from assistants.language_mentor.tools.knowledge import _iter_notes, _root
-from exam_http import router as exam_router
-from markdown_http import router as markdown_router
-from chat_http import router as chat_router
 
-app = FastAPI(title="nature-of-language notes API", docs_url=None, redoc_url=None)
-app.include_router(exam_router)
-app.include_router(markdown_router)
-app.include_router(chat_router)
-
-
-@app.middleware("http")
-async def limit_exam_body(request: Request, call_next):
-    if request.url.path in {"/exam/papers", "/exam/grade"}:
-        if request.headers.get("content-length", "").isdigit() and int(request.headers["content-length"]) > 20000:
-            return JSONResponse({"detail": "练习请求过大"}, status_code=413)
-        chunks = bytearray()
-        async for chunk in request.stream():
-            chunks.extend(chunk)
-            if len(chunks) > 20000:
-                return JSONResponse({"detail": "练习请求过大"}, status_code=413)
-        request._body = bytes(chunks)
-    return await call_next(request)
+router = APIRouter(tags=["notes"])
 
 
 def _extract_title(path: Path) -> str:
@@ -50,7 +28,7 @@ def _extract_title(path: Path) -> str:
     return path.stem
 
 
-@app.get("/notes")
+@router.get("/notes")
 def list_notes() -> list[dict[str, str]]:
     root = _root()
     if not root.is_dir():
@@ -58,7 +36,7 @@ def list_notes() -> list[dict[str, str]]:
     return [{"path": str(p.relative_to(root)), "title": _extract_title(p)} for p in _iter_notes(root)]
 
 
-@app.get("/notes/{path:path}", response_class=PlainTextResponse)
+@router.get("/notes/{path:path}", response_class=PlainTextResponse)
 def read_note(path: str) -> PlainTextResponse:
     root = _root()
     if not root.is_dir():

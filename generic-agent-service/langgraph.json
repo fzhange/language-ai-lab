@@ -12,7 +12,7 @@
     "translation-mentor": "./assistants/translator/mentor.py:make_translation_mentor_graph"
   },
   "http": {
-    "app": "./notes_http.py:app"
+    "app": "./http_api/app.py:app"
   },
   "checkpointer": {
     "backend": "custom",

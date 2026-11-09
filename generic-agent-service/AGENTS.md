@@ -39,7 +39,7 @@
 1. **新增 Assistant 的步骤**：在 `assistants/` 建自包含包（`agent.py` 工厂 + `prompts/` + `tools/`）→ 在 `langgraph.json` 注册 graph id。工厂可以是 async（如需 await 加载 MCP 工具）。
 2. **checkpointer/store 由 LangGraph Server 注入**，业务 graph 不接线。`langgraph.json` 通过 `core/pg_persistence.py` 工厂使用 PG；连接凭证仅在 `.env`，表位于独立 `language_ai_lab` schema。初始化用 `uv run python -m core.pg_persistence`。本地 dev 的 thread/run 管理记录仍存 `.langgraph_api`，旧会话不会自动迁移。
 3. **模型**：`core/model.py` 的 `get_chat_model()`，默认 `openai:gpt-5.6-terra`（OpenAI 兼容代理），必须 `use_responses_api=False`；`CHAT_MODEL` env 可切换。
-4. **安全红线**：web server 场景禁用可写的 `FilesystemBackend` / `LocalShellBackend`（见 `backends_demo.py` 注释）；读本地文件用自定义只读 tool + 相对路径校验；密钥仅 env。
+4. **安全红线**：web server 场景禁用可写的 `FilesystemBackend` / `LocalShellBackend`（见 `examples/backends_demo.py` 注释）；读本地文件用自定义只读 tool + 相对路径校验；密钥仅 env。
 5. **MCP**：token 等配置采用惰性读取模式——在图谱工厂/工具函数内读 env，避免 import 期失败。
 6. **代理丢工具名的自愈**：OpenAI 兼容代理（底层 Anthropic）流式翻译偶发丢失 tool_call 的 name（id/args 完好）。已在 `language-mentor` 接入 `RepairToolCallsMiddleware`（按参数签名修复空名工具调用）。若仍频繁失败，可在 `.env` 设 `CHAT_DISABLE_STREAMING=1` 彻底绕开流式分块合并（牺牲逐 token 效果）。新 assistant 若带本地工具，建议同样挂上该 middleware。
 
@@ -48,6 +48,39 @@
 - 已落地：`language-mentor`（知识库 + 高亮工具）、`writing-coach`、`vocab-quiz`。
 - Supabase 高亮访问采用**用户 JWT 透传**：前端把会话 token 放 `config.configurable.supabase_token`，服务端用 anon key + JWT 走 PostgREST，RLS 做授权，服务端不存 service key。env 需要 `SUPABASE_URL` / `SUPABASE_ANON_KEY`。
 - 后续候选：学习报告（复用 `highlight-report`）、写作批改历史落库、测验结果沉淀。
+
+## A2A 自注册（对外被发现/编排）
+
+把 assistant 作为独立 A2A agent 暴露，供外部系统发现与调用。采用**自注册 /
+Well-Known URI** 策略（无需外部 registry center），代码集中在 `a2a_server/` 包内，
+router 由 `http_api/` 的 app 挂到 LangGraph Server 的自定义 HTTP app（经
+`langgraph.json` 的 `http.app` 加载）。
+
+- 卡片数据：`a2a_server/registry.py`（`AGENTS` 清单 + `build_card`）。新增对外
+  agent 只需在 `AGENTS` 追加一条（`graph_id` 必须对齐 `langgraph.json`）。
+- 路由：`a2a_server/http.py`
+  - 发现：`GET /.well-known/agent-card.json`（flagship=language-mentor，兼容
+    旧名 `/.well-known/agent.json`）、`GET /a2a/agents`（本机注册目录）、
+    `GET /a2a/{id}/.well-known/agent-card.json`（单个卡片）。
+  - 调用：`POST /a2a/{id}` JSON-RPC 2.0。provider 在进程内跑自己的 graph，核心是
+    `run_agent_task`：把 `graph.ainvoke` 丢到一个**常驻后台事件循环**（独立线程）执行，
+    父循环只 `await` 结果 + 超时（`A2A_PROVIDER_TIMEOUT`，默认 150s）。**不能**在父循环
+    直接 await 子图谱、也不能回到 `/runs/*` 队列——否则 consumer（mentor 节点内经
+    `call_specialist`）正跑在该循环里会**循环重入死锁**（现象：导师思考中…永不返回）。
+    节点多为 async 故必须 `ainvoke`（sync `invoke` 会报 "No synchronous function"）。
+    `message/send` 返回 completed Task + 文本 artifact；`message/stream` 仅
+    `streaming:true` 的 agent（language-mentor）支持，以 SSE 返回流式事件。
+- Agent 间互调（consumer→provider）：`language-mentor` 挂了 `call_specialist` 工具
+  （`assistants/language_mentor/tools/a2a_client.py`），遇到写作批改/词汇测验时委派给
+  `writing-coach`/`vocab-quiz`。默认**同进程直跑**：工具直接调用
+  `a2a_server.http.run_agent_task`（走上面那条常驻循环路径，防死锁）；仅当设了 env
+  `A2A_BASE_URL` 时才改走真实 A2A JSON-RPC over HTTP（provider 部署在别的进程/机器）。
+- 身份红线不变：需要用户数据的 agent（`vocab-quiz`/`language-mentor`）在卡片里
+  声明 bearer 安全方案；JWT 经 `Authorization` 头注入
+  `config.configurable.supabase_token`，**绝不取自消息文本**；`call_specialist`
+  从 config 读出 token 后向下游透传。
+- 测试：`tests/test_a2a_http.py`（卡片/目录 + `message/send`/`message/stream` 桥接
+  + `call_specialist` 工具，`get_client` 被 mock，不需真实 server）。
 
 ## 本地运行
 

@@ -131,7 +131,7 @@ deepagents 对 `openai:*` 模型默认走 Responses API，不加这个会 404。
 
 ## 专项练习接口
 
-`/exam/papers` 与 `/exam/grade` 是 `notes_http.py` 挂载在 LangGraph Server 上的独立 HTTP 路由；不改变现有 `vocab-quiz`、`highlight-*` 图谱。需配置 `SUPABASE_URL`、`SUPABASE_ANON_KEY` 用于服务端验证登录 JWT，以及 `EXAM_SESSION_KEY`（独立、长期稳定的 Fernet key，通过 `uv run python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'` 生成，**仅通过服务端环境变量保存**）。生产环境应由鉴权网关统一暴露，切勿直接对公网开放 LangGraph Server。
+`/exam/papers` 与 `/exam/grade` 是 `http_api/` 的 app 挂载在 LangGraph Server 上的独立 HTTP 路由；不改变现有 `vocab-quiz`、`highlight-*` 图谱。需配置 `SUPABASE_URL`、`SUPABASE_ANON_KEY` 用于服务端验证登录 JWT，以及 `EXAM_SESSION_KEY`（独立、长期稳定的 Fernet key，通过 `uv run python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'` 生成，**仅通过服务端环境变量保存**）。生产环境应由鉴权网关统一暴露，切勿直接对公网开放 LangGraph Server。
 
 客户端在 `Authorization: Bearer <Supabase JWT>` 中传登录令牌：
 

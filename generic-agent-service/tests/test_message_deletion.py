@@ -40,7 +40,7 @@ class MessageDeletionTests(unittest.TestCase):
 
 class DeleteReplyRouteTests(unittest.TestCase):
     def setUp(self):
-        from chat_http import router
+        from http_api.chat import router
         self.app = FastAPI()
         self.app.include_router(router)
         self.thread_id = '3cb1fb25-e4f3-44b5-9c05-b643b7b68dd6'
@@ -55,9 +55,9 @@ class DeleteReplyRouteTests(unittest.TestCase):
         self.checkpointer = checkpointer
 
     def request(self, owner='alice', status='idle'):
-        with patch('chat_http.create_checkpointer', self.checkpointer), patch(
-            'chat_http.artifact_owner', new_callable=AsyncMock, return_value=owner
-        ), patch('chat_http.get_client', return_value=SimpleNamespace(threads=SimpleNamespace(
+        with patch('http_api.chat.create_checkpointer', self.checkpointer), patch(
+            'http_api.chat.artifact_owner', new_callable=AsyncMock, return_value=owner
+        ), patch('http_api.chat.get_client', return_value=SimpleNamespace(threads=SimpleNamespace(
             get=AsyncMock(return_value={'status': status})
         ))), TestClient(self.app) as client:
             return client.request('DELETE', f'/chat/{self.thread_id}/replies/reply',
@@ -76,9 +76,9 @@ class DeleteReplyRouteTests(unittest.TestCase):
         self.saver.delete_reply.assert_not_awaited()
 
     def turn(self, owner='alice', status='idle', human_id='question'):
-        with patch('chat_http.create_checkpointer', self.checkpointer), patch(
-            'chat_http.artifact_owner', new_callable=AsyncMock, return_value=owner
-        ), patch('chat_http.get_client', return_value=SimpleNamespace(threads=SimpleNamespace(
+        with patch('http_api.chat.create_checkpointer', self.checkpointer), patch(
+            'http_api.chat.artifact_owner', new_callable=AsyncMock, return_value=owner
+        ), patch('http_api.chat.get_client', return_value=SimpleNamespace(threads=SimpleNamespace(
             get=AsyncMock(return_value={'status': status})
         ))), TestClient(self.app) as client:
             return client.request('DELETE', f'/chat/{self.thread_id}/turns/{human_id}',

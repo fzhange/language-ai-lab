@@ -6,7 +6,7 @@ from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from assistants.language_mentor.exam_practice import issue_paper
-from notes_http import app
+from http_api import app
 
 from test_exam_practice import GRAMMAR
 
@@ -25,8 +25,8 @@ class ExamHttpTests(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
 
     def test_authenticated_issue_and_grade_never_accept_user_id_from_body(self):
-        with patch("exam_http._verified_user", new_callable=AsyncMock, return_value="real-user"), patch(
-            "exam_http.generate_simulated", new_callable=AsyncMock, return_value=GRAMMAR
+        with patch("http_api.exam._verified_user", new_callable=AsyncMock, return_value="real-user"), patch(
+            "http_api.exam.generate_simulated", new_callable=AsyncMock, return_value=GRAMMAR
         ):
             response = self.client.post("/exam/papers", headers={"Authorization": "Bearer valid-token"}, json={
                 "level": "cet", "topic": "grammar", "source": "simulated"
@@ -45,7 +45,7 @@ class ExamHttpTests(unittest.TestCase):
             self.assertEqual(wrong_user.status_code, 422)
 
     def test_invalid_scope_or_answers_rejected(self):
-        with patch("exam_http._verified_user", new_callable=AsyncMock, return_value="real-user"):
+        with patch("http_api.exam._verified_user", new_callable=AsyncMock, return_value="real-user"):
             response = self.client.post("/exam/papers", headers={"Authorization": "Bearer valid-token"}, json={
                 "level": "unknown", "topic": "grammar", "source": "simulated"
             })
@@ -57,7 +57,7 @@ class ExamHttpTests(unittest.TestCase):
             self.assertEqual(result.status_code, 422)
 
     def test_unlicensed_originals_return_explicit_empty_state(self):
-        with patch("exam_http._verified_user", new_callable=AsyncMock, return_value="real-user"):
+        with patch("http_api.exam._verified_user", new_callable=AsyncMock, return_value="real-user"):
             response = self.client.post("/exam/papers", headers={"Authorization": "Bearer valid-token"}, json={
                 "level": "cet", "topic": "reading", "source": "authentic"
             })
@@ -67,8 +67,8 @@ class ExamHttpTests(unittest.TestCase):
 
     def test_licensed_originals_use_same_answer_flow_and_provenance(self):
         original = {"paper": GRAMMAR, "origin": {"name": "许可来源", "url": "https://example.com", "year": "2024", "region": "全国"}}
-        with patch("exam_http._verified_user", new_callable=AsyncMock, return_value="real-user"), patch(
-            "exam_http.select_authentic", return_value=original
+        with patch("http_api.exam._verified_user", new_callable=AsyncMock, return_value="real-user"), patch(
+            "http_api.exam.select_authentic", return_value=original
         ):
             response = self.client.post("/exam/papers", headers={"Authorization": "Bearer valid-token"}, json={
                 "level": "cet", "topic": "grammar", "source": "authentic"
@@ -87,13 +87,13 @@ class ExamHttpTests(unittest.TestCase):
         import asyncio
         from starlette.requests import Request
         from fastapi import HTTPException
-        from exam_http import _verified_user
+        from http_api.exam import _verified_user
 
         request = Request({"type": "http", "method": "POST", "path": "/exam/papers", "headers": [
             (b"authorization", b"Bearer forged-token")
         ]})
         with patch.dict(os.environ, {"SUPABASE_URL": "https://auth.example.com", "SUPABASE_ANON_KEY": "public-key"}), patch(
-            "exam_http.httpx.AsyncClient.get", new_callable=AsyncMock
+            "http_api.exam.httpx.AsyncClient.get", new_callable=AsyncMock
         ) as get:
             get.return_value.status_code = 401
             with self.assertRaises(HTTPException) as raised:
@@ -101,8 +101,8 @@ class ExamHttpTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 401)
 
     def test_model_provider_error_returns_actionable_generation_failure(self):
-        with patch("exam_http._verified_user", new_callable=AsyncMock, return_value="real-user"), patch(
-            "exam_http.generate_simulated", new_callable=AsyncMock, side_effect=ConnectionError("model unavailable")
+        with patch("http_api.exam._verified_user", new_callable=AsyncMock, return_value="real-user"), patch(
+            "http_api.exam.generate_simulated", new_callable=AsyncMock, side_effect=ConnectionError("model unavailable")
         ):
             response = self.client.post("/exam/papers", headers={"Authorization": "Bearer valid-token"}, json={
                 "level": "cet", "topic": "grammar", "source": "simulated"

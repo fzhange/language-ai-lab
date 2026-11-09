@@ -154,10 +154,10 @@ class MarkdownArtifactTests(unittest.TestCase):
 
     def test_download_returns_service_unavailable_on_object_store_error(self):
         from botocore.exceptions import EndpointConnectionError
-        from notes_http import app
+        from http_api import app
         descriptor = self.save()
         self.storage.failure = EndpointConnectionError(endpoint_url='https://unavailable.example.com:8333')
-        with TestClient(app) as client, patch('markdown_http.artifact_owner', new_callable=AsyncMock, return_value='alice'):
+        with TestClient(app) as client, patch('http_api.markdown.artifact_owner', new_callable=AsyncMock, return_value='alice'):
             response = client.get(descriptor['download_path'])
         self.assertEqual(response.status_code, 503)
 
@@ -228,19 +228,19 @@ class MarkdownArtifactTests(unittest.TestCase):
         self.assertIn('search_notes', delegated_tools)
 
     def test_download_checks_owner_and_returns_an_attachment(self):
-        from notes_http import app
+        from http_api import app
         descriptor = self.save()
-        with TestClient(app) as client, patch('markdown_http.artifact_owner', new_callable=AsyncMock, return_value='alice'):
+        with TestClient(app) as client, patch('http_api.markdown.artifact_owner', new_callable=AsyncMock, return_value='alice'):
             response = client.get(descriptor['download_path'])
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.text, '# Lesson\nExample.')
             self.assertIn('attachment;', response.headers['content-disposition'])
             self.assertEqual(response.headers['x-content-type-options'], 'nosniff')
-        with TestClient(app) as client, patch('markdown_http.artifact_owner', new_callable=AsyncMock, return_value='bob'):
+        with TestClient(app) as client, patch('http_api.markdown.artifact_owner', new_callable=AsyncMock, return_value='bob'):
             self.assertEqual(client.get(descriptor['download_path']).status_code, 404)
 
     def test_configured_auth_requires_a_verified_token(self):
-        from notes_http import app
+        from http_api import app
         with patch.dict(os.environ, {'SUPABASE_URL': 'https://auth.example.com', 'SUPABASE_ANON_KEY': 'anon'}), TestClient(app) as client:
             self.assertEqual(client.get('/artifacts/' + 'a' * 64 + '/download').status_code, 401)
 

@@ -159,7 +159,8 @@ class NativeServerIntegrationTests(unittest.TestCase):
         for section in ['checkpointer', 'store']:
             file, symbol = config[section]['path'].split(':')
             config[section]['path'] = str(root / file) + ':' + symbol
-        config['http']['app'] = str(root / 'notes_http.py') + ':app'
+        http_file, http_symbol = config['http']['app'].split(':')
+        config['http']['app'] = str(root / http_file) + ':' + http_symbol
         config['env'] = str(root / '.env')
         with socket.socket() as socket_:
             socket_.bind(('127.0.0.1', 0))

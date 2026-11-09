@@ -1,11 +1,11 @@
 """Deep Agents backends demo: StateBackend, FilesystemBackend, LocalShellBackend, StoreBackend, CompositeBackend.
 
 Run individual demos:
-    python backends_demo.py state
-    python backends_demo.py filesystem
-    python backends_demo.py localshell
-    python backends_demo.py store
-    python backends_demo.py composite
+    python examples/backends_demo.py state
+    python examples/backends_demo.py filesystem
+    python examples/backends_demo.py localshell
+    python examples/backends_demo.py store
+    python examples/backends_demo.py composite
 """
 
 import sys
