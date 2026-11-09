@@ -8,7 +8,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from assistants.translator.agent import TranslationRequest, _text_of
+from assistants.translator.agent import TranslationRequest, _text_of, translate_request
 from core.model import get_chat_model
 from core.tracing import TRANSLATOR, with_trace_tags
 
@@ -26,6 +26,7 @@ class ConversationMessage(BaseModel):
 
 
 class MentorInput(TranslationRequest):
+    include_translation: bool = False
     focus: str = Field(default="", max_length=200)
     follow_up: str = Field(default="", max_length=2000)
     history: list[ConversationMessage] = Field(default_factory=list, max_length=41)
@@ -58,6 +59,8 @@ class MentorState(TypedDict):
     follow_up: str
     history: list[dict]
     explanation: str
+    include_translation: bool
+    translation: str
 
 
 def make_translation_mentor_graph():
@@ -92,9 +95,21 @@ def make_translation_mentor_graph():
             raise ValueError("The mentor model returned no text")
         return {"explanation": explanation}
 
+    def route(state: MentorState):
+        request = MentorInput.model_validate(state)
+        if request.include_translation and request.source_language == "en" and not request.follow_up:
+            return ["explain", "direct_translation"]
+        return ["explain"]
+
+    async def direct_translation(state: MentorState, config: RunnableConfig):
+        request = MentorInput.model_validate(state)
+        return {"translation": await translate_request(request, config)}
+
     graph = StateGraph(MentorState, input_schema=MentorInput)
     graph.add_node("explain", explain)
-    graph.add_edge(START, "explain")
+    graph.add_node("direct_translation", direct_translation)
+    graph.add_conditional_edges(START, route, ["explain", "direct_translation"])
     graph.add_edge("explain", END)
+    graph.add_edge("direct_translation", END)
     # Context is supplied per request, never stored as persistent graph checkpoints.
     return with_trace_tags(graph.compile(name="translation-mentor", checkpointer=False), TRANSLATOR, "translation-mentor")

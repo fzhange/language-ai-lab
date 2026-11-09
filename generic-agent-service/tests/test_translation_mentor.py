@@ -1,3 +1,4 @@
+import asyncio
 import json
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -10,6 +11,60 @@ from assistants.translator.mentor import MentorInput, make_translation_mentor_gr
 
 
 class TranslationMentorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_optional_direct_translation_runs_in_parallel_and_preserves_teaching(self):
+        mentor_started = asyncio.Event()
+        translation_started = asyncio.Event()
+
+        async def teaching(messages, **kwargs):
+            mentor_started.set()
+            await asyncio.wait_for(translation_started.wait(), 1)
+            return AIMessage(content="## 发音\n/səbˈstænʃəl/\n\n## 用法与区别\n用法说明")
+
+        async def translation(messages, **kwargs):
+            translation_started.set()
+            await asyncio.wait_for(mentor_started.wait(), 1)
+            self.assertIn("Output ONLY the translated text", messages[0].content)
+            self.assertEqual(messages[1].content, "substantial")
+            return AIMessage(content="可观的；大量的")
+
+        with patch("assistants.translator.mentor.get_chat_model") as mentor_model, patch(
+            "assistants.translator.agent.get_chat_model"
+        ) as translation_model:
+            mentor_model.return_value.ainvoke = AsyncMock(side_effect=teaching)
+            translation_model.return_value.ainvoke = AsyncMock(side_effect=translation)
+            result = await make_translation_mentor_graph().ainvoke({
+                "text": "substantial", "source_language": "en", "target_language": "zh", "include_translation": True,
+            })
+        self.assertEqual(result["translation"], "可观的；大量的")
+        self.assertIn("## 发音", result["explanation"])
+
+    async def test_direct_translation_is_skipped_for_chinese_followups_and_legacy_requests(self):
+        for extra in [
+            {"source_language": "zh", "target_language": "en", "include_translation": True},
+            {"source_language": "en", "target_language": "zh"},
+            {"source_language": "en", "target_language": "zh", "include_translation": True,
+             "follow_up": "Why?", "history": [{"role": "assistant", "content": "Previous teaching"}]},
+        ]:
+            with self.subTest(extra=extra), patch("assistants.translator.mentor.get_chat_model") as model, patch(
+                "assistants.translator.mentor.translate_request"
+            ) as translator:
+                model.return_value.ainvoke = AsyncMock(return_value=AIMessage(content="Teaching"))
+                result = await make_translation_mentor_graph().ainvoke({"text": "test", **extra})
+                translator.assert_not_called()
+                self.assertNotIn("translation", result)
+
+    async def test_dual_model_stream_keeps_separate_node_metadata(self):
+        with patch("assistants.translator.mentor.get_chat_model", return_value=FakeListChatModel(responses=["Teaching"])), patch(
+            "assistants.translator.agent.get_chat_model", return_value=FakeListChatModel(responses=["译文"])
+        ):
+            events = [event async for event in make_translation_mentor_graph().astream({
+                "text": "test", "source_language": "en", "target_language": "zh", "include_translation": True,
+            }, stream_mode=["messages", "values"])]
+        for node, expected in [("explain", "Teaching"), ("direct_translation", "译文")]:
+            tokens = [data[0].content for mode, data in events if mode == "messages" and data[1]["langgraph_node"] == node]
+            self.assertEqual("".join(tokens), expected)
+        self.assertEqual(events[-1][1]["translation"], "译文")
+
     async def test_contextual_teaching_and_both_directions(self):
         for text, focus, source, target in [
             ("Capture the selection before bringing Translate forward.", "capture", "en", "zh"),
