@@ -61,13 +61,12 @@ function TodosPanel({ values }: { values: unknown }) {
         {todos.map((todo, i) => (
           <li key={i} className="flex items-start gap-2 text-muted-foreground">
             <span
-              className={`mt-1.5 inline-block size-2 shrink-0 rounded-full ${
-                todo.status === 'completed'
+              className={`mt-1.5 inline-block size-2 shrink-0 rounded-full ${todo.status === 'completed'
                   ? 'bg-emerald-500'
                   : todo.status === 'in_progress'
                     ? 'bg-primary'
                     : 'bg-muted-foreground/40'
-              }`}
+                }`}
             />
             <span>{todo.content ?? JSON.stringify(todo)}</span>
           </li>
@@ -483,9 +482,10 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
               if (!checkId) return null
               return <div key={msg.id ?? i} className="mx-2 flex min-w-0 items-start gap-1 sm:mx-8">
                 <div className="min-w-0 max-w-2xl flex-1">
-                  <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">正在加载理解检查…</p>}><UnderstandingCheck content={text} disabled={sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval}
-                    submittedAnswer={restoredUnderstandingAnswer(stream.messages, checkId)}
-                    onAnswer={(question, answer) => answerCheck(checkId, question, answer)} /></Suspense>
+                  <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">正在加载理解检查…</p>}>
+                    <UnderstandingCheck content={text} disabled={sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval}
+                      submittedAnswer={restoredUnderstandingAnswer(stream.messages, checkId)}
+                      onAnswer={(question, answer) => answerCheck(checkId, question, answer)} /></Suspense>
                 </div>
                 {turnTrash(i)}
               </div>
@@ -564,11 +564,10 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
             <div key={msg.id ?? i} className={`flex items-end gap-1 ${isHuman ? 'justify-end' : 'justify-start'}`}>
               {isHuman && !(toolCalls && toolCalls.length > 0) && msg.id && turnTrash(i)}
               <div
-                className={`max-w-[95%] rounded-xl px-4 py-3 text-base leading-relaxed sm:max-w-[85%] ${
-                  isHuman
+                className={`max-w-[95%] rounded-xl px-4 py-3 text-base leading-relaxed sm:max-w-[85%] ${isHuman
                     ? 'bg-primary text-primary-foreground shadow-sm'
                     : 'border bg-card text-card-foreground shadow-sm'
-                }`}
+                  }`}
               >
                 {!isHuman && toolCalls && toolCalls.length > 0 && (
                   <div className="mb-2 flex flex-wrap gap-1">
@@ -604,109 +603,111 @@ function MentorThread({ threadId, onThreadId, onRecoverThread, userId, accessTok
       </div>
 
       <BorderBeam size="pulse-inner" colorVariant="ocean" theme="light" staticColors strength={toolMode ? 1 : 0.8} brightness={1.55} duration={3.6}
-        style={{ boxShadow: toolMode
-          ? '0 0 22px -5px rgba(89, 94, 232, 0.36), 0 0 42px -20px rgba(79, 137, 245, 0.4)'
-          : '0 0 18px -6px rgba(89, 94, 232, 0.27), 0 0 36px -18px rgba(79, 137, 245, 0.32)' }}
+        style={{
+          boxShadow: toolMode
+            ? '0 0 22px -5px rgba(89, 94, 232, 0.36), 0 0 42px -20px rgba(79, 137, 245, 0.4)'
+            : '0 0 18px -6px rgba(89, 94, 232, 0.27), 0 0 36px -18px rgba(79, 137, 245, 0.32)'
+        }}
         className="shrink-0 min-w-0 motion-safe:transition-shadow motion-safe:duration-700">
         <form onSubmit={send} className="space-y-2 rounded-xl border bg-card p-3 shadow-sm">
-        {image && (
-          <Dialog.Root>
-            <div className="relative w-fit">
-              <Dialog.Trigger asChild>
-                <button type="button" aria-label="放大图片" className="block cursor-zoom-in rounded-lg focus-visible:outline-2 focus-visible:outline-primary">
-                  <img src={image} alt="待发送图片" className="max-h-28 max-w-36 rounded-lg border object-contain" />
-                </button>
-              </Dialog.Trigger>
-              <Button type="button" variant="secondary" size="icon" aria-label="移除图片" disabled={sending || stream.isLoading}
-                onClick={() => { ++imageSelection.current; setImage(null); if (imageInputRef.current) imageInputRef.current.value = '' }}
-                className="absolute -right-2 -top-2 size-7 rounded-full shadow-sm">
-                <X className="size-4" />
-              </Button>
+          {image && (
+            <Dialog.Root>
+              <div className="relative w-fit">
+                <Dialog.Trigger asChild>
+                  <button type="button" aria-label="放大图片" className="block cursor-zoom-in rounded-lg focus-visible:outline-2 focus-visible:outline-primary">
+                    <img src={image} alt="待发送图片" className="max-h-28 max-w-36 rounded-lg border object-contain" />
+                  </button>
+                </Dialog.Trigger>
+                <Button type="button" variant="secondary" size="icon" aria-label="移除图片" disabled={sending || stream.isLoading}
+                  onClick={() => { ++imageSelection.current; setImage(null); if (imageInputRef.current) imageInputRef.current.value = '' }}
+                  className="absolute -right-2 -top-2 size-7 rounded-full shadow-sm">
+                  <X className="size-4" />
+                </Button>
+              </div>
+              <Dialog.Portal>
+                <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-[2px]" />
+                <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[95dvh] w-[92vw] max-w-5xl -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2 rounded-2xl bg-card p-3 shadow-2xl sm:p-5">
+                  <div className="flex w-full items-center justify-between gap-3">
+                    <Dialog.Title className="text-sm font-medium">图片预览</Dialog.Title>
+                    <Dialog.Close asChild>
+                      <Button type="button" variant="ghost" size="icon" aria-label="关闭图片预览"><X /></Button>
+                    </Dialog.Close>
+                  </div>
+                  <Dialog.Description className="sr-only">待发送图片的大图预览。</Dialog.Description>
+                  <img src={image} alt="放大的待发送图片" className="max-h-[85dvh] max-w-full rounded-lg object-contain" />
+                </Dialog.Content>
+              </Dialog.Portal>
+            </Dialog.Root>
+          )}
+          {imageLoading && (
+            <div role="status" className="flex h-20 w-fit min-w-36 items-center justify-center gap-2 rounded-lg border bg-accent/40 px-3 text-xs text-muted-foreground">
+              <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />正在处理图片…
             </div>
-            <Dialog.Portal>
-              <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-[2px]" />
-              <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[95dvh] w-[92vw] max-w-5xl -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2 rounded-2xl bg-card p-3 shadow-2xl sm:p-5">
-                <div className="flex w-full items-center justify-between gap-3">
-                  <Dialog.Title className="text-sm font-medium">图片预览</Dialog.Title>
-                  <Dialog.Close asChild>
-                    <Button type="button" variant="ghost" size="icon" aria-label="关闭图片预览"><X /></Button>
-                  </Dialog.Close>
-                </div>
-                <Dialog.Description className="sr-only">待发送图片的大图预览。</Dialog.Description>
-                <img src={image} alt="放大的待发送图片" className="max-h-[85dvh] max-w-full rounded-lg object-contain" />
-              </Dialog.Content>
-            </Dialog.Portal>
-          </Dialog.Root>
-        )}
-        {imageLoading && (
-          <div role="status" className="flex h-20 w-fit min-w-36 items-center justify-center gap-2 rounded-lg border bg-accent/40 px-3 text-xs text-muted-foreground">
-            <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />正在处理图片…
+          )}
+          {imageError && <p role={recovering ? 'status' : 'alert'} className={`text-xs ${recovering ? 'text-amber-700' : 'text-destructive'}`}>{imageError}</p>}
+          <div className="flex items-end gap-2">
+            <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp" aria-label="选择图片"
+              disabled={Boolean(toolMode) || sending || stream.isLoading} className="sr-only" onChange={(e: ChangeEvent<HTMLInputElement>) => selectImage(e.target.files?.[0])} />
+            {!toolMode && (
+              <Button type="button" variant="ghost" size="icon" aria-label="添加图片" title="添加图片（也可粘贴截图）"
+                disabled={sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval}
+                onClick={() => imageInputRef.current?.click()} className="mb-1 shrink-0">
+                <ImagePlus className="size-5" />
+              </Button>
+            )}
+            <Textarea
+              ref={composerRef}
+              aria-label="输入问题"
+              aria-describedby={toolMode ? 'mentor-tool-status' : undefined}
+              aria-invalid={overLimit || undefined}
+              disabled={sending || deletingReply !== null || stream.isLoading}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onPaste={toolMode ? undefined : pasteImage}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault()
+                  e.currentTarget.form?.requestSubmit()
+                }
+              }}
+              rows={toolMode === 'synonym' ? 1 : 2}
+              placeholder={toolMode === 'sentence' ? '粘贴一条英文句子，发送后分析主干与修饰关系…' : toolMode === 'synonym' ? '英文单词或短语，如 provide、take into account' : '输入你的问题或粘贴截图…（Enter 发送，Shift + Enter 换行）'}
+              className={`max-h-40 min-w-0 flex-1 border-0 bg-transparent shadow-none focus-visible:border-transparent focus-visible:ring-0 ${toolMode === 'synonym' ? 'min-h-12 resize-none' : 'resize-y'}`}
+            />
+            {stream.isLoading || sending ? (
+              <Button variant="outline" type="button" onClick={() => { cancelled.current = true; void stream.stop() }} className="mb-1">
+                <CircleStop />停止
+              </Button>
+            ) : (
+              <Button type="submit" disabled={(!input.trim() && !image) || overLimit || imageLoading || sending || deletingReply !== null || stream.isThreadLoading || hasPendingApproval} className="mb-1 shrink-0">
+                {toolMode === 'synonym' ? <GitCompareArrows /> : <ArrowUp />}{toolMode === 'synonym' ? '查找' : '发送'}
+              </Button>
+            )}
           </div>
-        )}
-        {imageError && <p role={recovering ? 'status' : 'alert'} className={`text-xs ${recovering ? 'text-amber-700' : 'text-destructive'}`}>{imageError}</p>}
-        <div className="flex items-end gap-2">
-          <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp" aria-label="选择图片"
-            disabled={Boolean(toolMode) || sending || stream.isLoading} className="sr-only" onChange={(e: ChangeEvent<HTMLInputElement>) => selectImage(e.target.files?.[0])} />
-          {!toolMode && (
-            <Button type="button" variant="ghost" size="icon" aria-label="添加图片" title="添加图片（也可粘贴截图）"
-              disabled={sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval}
-              onClick={() => imageInputRef.current?.click()} className="mb-1 shrink-0">
-              <ImagePlus className="size-5" />
+          <div className="flex flex-wrap items-center gap-2 border-t pt-2">
+            <Button type="button" size="sm" variant={toolMode === 'sentence' ? 'secondary' : 'ghost'} aria-pressed={toolMode === 'sentence'}
+              disabled={Boolean(image) || imageLoading || sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval}
+              onClick={() => selectTool('sentence')} className={`min-h-10 rounded-full text-xs ${toolMode === 'sentence' ? 'ring-1 ring-primary/30' : ''}`}>
+              <BookOpen className="size-3.5" />句子结构分析
             </Button>
-          )}
-          <Textarea
-            ref={composerRef}
-            aria-label="输入问题"
-            aria-describedby={toolMode ? 'mentor-tool-status' : undefined}
-            aria-invalid={overLimit || undefined}
-            disabled={sending || deletingReply !== null || stream.isLoading}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onPaste={toolMode ? undefined : pasteImage}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault()
-                e.currentTarget.form?.requestSubmit()
-              }
-            }}
-            rows={toolMode === 'synonym' ? 1 : 2}
-            placeholder={toolMode === 'sentence' ? '粘贴一条英文句子，发送后分析主干与修饰关系…' : toolMode === 'synonym' ? '英文单词或短语，如 provide、take into account' : '输入你的问题或粘贴截图…（Enter 发送，Shift + Enter 换行）'}
-            className={`max-h-40 min-w-0 flex-1 border-0 bg-transparent shadow-none focus-visible:border-transparent focus-visible:ring-0 ${toolMode === 'synonym' ? 'min-h-12 resize-none' : 'resize-y'}`}
-          />
-          {stream.isLoading || sending ? (
-            <Button variant="outline" type="button" onClick={() => { cancelled.current = true; void stream.stop() }} className="mb-1">
-              <CircleStop />停止
+            <Button type="button" size="sm" variant={toolMode === 'synonym' ? 'secondary' : 'ghost'} aria-pressed={toolMode === 'synonym'}
+              disabled={Boolean(image) || imageLoading || sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval}
+              onClick={() => selectTool('synonym')} className={`min-h-10 rounded-full text-xs ${toolMode === 'synonym' ? 'ring-1 ring-primary/30' : ''}`}>
+              <GitCompareArrows className="size-3.5" />查找近义词
             </Button>
-          ) : (
-            <Button type="submit" disabled={(!input.trim() && !image) || overLimit || imageLoading || sending || deletingReply !== null || stream.isThreadLoading || hasPendingApproval} className="mb-1 shrink-0">
-              {toolMode === 'synonym' ? <GitCompareArrows /> : <ArrowUp />}{toolMode === 'synonym' ? '查找' : '发送'}
-            </Button>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-2 border-t pt-2">
-          <Button type="button" size="sm" variant={toolMode === 'sentence' ? 'secondary' : 'ghost'} aria-pressed={toolMode === 'sentence'}
-            disabled={Boolean(image) || imageLoading || sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval}
-            onClick={() => selectTool('sentence')} className={`min-h-10 rounded-full text-xs ${toolMode === 'sentence' ? 'ring-1 ring-primary/30' : ''}`}>
-            <BookOpen className="size-3.5" />句子结构分析
-          </Button>
-          <Button type="button" size="sm" variant={toolMode === 'synonym' ? 'secondary' : 'ghost'} aria-pressed={toolMode === 'synonym'}
-            disabled={Boolean(image) || imageLoading || sending || stream.isLoading || stream.isThreadLoading || hasPendingApproval}
-            onClick={() => selectTool('synonym')} className={`min-h-10 rounded-full text-xs ${toolMode === 'synonym' ? 'ring-1 ring-primary/30' : ''}`}>
-            <GitCompareArrows className="size-3.5" />查找近义词
-          </Button>
-          {toolMode && <>
-            <span role="status" className="sr-only">{toolMode === 'sentence' ? '句子结构分析' : '查找近义词'}</span>
-            <span id="mentor-tool-status" role={overLimit ? 'alert' : undefined}
-              className={`ml-auto text-xs tabular-nums ${overLimit ? 'font-medium text-destructive' : 'text-muted-foreground'}`}>
-              {overLimit ? `已输入 ${toolLength}/${toolLimit} 字，超出限制，请缩短后发送` : `${toolLength}/${toolLimit}`}
-            </span>
-            <Button type="button" variant="ghost" size="icon" aria-label="取消工具选择" title="取消工具选择"
-              disabled={sending || stream.isLoading}
-              onClick={() => { setToolMode(null); composerRef.current?.focus() }} className="size-8 shrink-0">
-              <X className="size-3.5" />
-            </Button>
-          </>}
-        </div>
+            {toolMode && <>
+              <span role="status" className="sr-only">{toolMode === 'sentence' ? '句子结构分析' : '查找近义词'}</span>
+              <span id="mentor-tool-status" role={overLimit ? 'alert' : undefined}
+                className={`ml-auto text-xs tabular-nums ${overLimit ? 'font-medium text-destructive' : 'text-muted-foreground'}`}>
+                {overLimit ? `已输入 ${toolLength}/${toolLimit} 字，超出限制，请缩短后发送` : `${toolLength}/${toolLimit}`}
+              </span>
+              <Button type="button" variant="ghost" size="icon" aria-label="取消工具选择" title="取消工具选择"
+                disabled={sending || stream.isLoading}
+                onClick={() => { setToolMode(null); composerRef.current?.focus() }} className="size-8 shrink-0">
+                <X className="size-3.5" />
+              </Button>
+            </>}
+          </div>
         </form>
       </BorderBeam>
     </div>
