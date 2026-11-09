@@ -21,6 +21,9 @@ export default function App() {
   const source = detectLanguage(text)
   const target: Language = source === 'en' ? 'zh' : 'en'
   const [result, setResult] = useState('')
+  const [translation, setTranslation] = useState('')
+  const [translationComplete, setTranslationComplete] = useState(false)
+  const [translationCopied, setTranslationCopied] = useState(false)
   const [history, setHistory] = useState<ConversationMessage[]>([])
   const [question, setQuestion] = useState('')
   const [pendingQuestion, setPendingQuestion] = useState('')
@@ -42,10 +45,12 @@ export default function App() {
   const followUpArea = useRef<HTMLTextAreaElement>(null)
   const dialog = useRef<HTMLDialogElement>(null)
   const running = useRef(false)
+  const activeText = useRef('')
   const requestId = useRef(0)
   const speechId = useRef(0)
   const checkingId = useRef(0)
   const copyTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const translationCopyTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const answerScroll = useRef<HTMLDivElement>(null)
   const followAnswer = useRef(true)
   const count = [...text].length
@@ -72,13 +77,22 @@ export default function App() {
     })
     void check()
     desktop.getAccessibilityPermission().then((value) => { if (active) setAccessibilityGranted(value) }).catch(() => {})
-    return () => { active = false; clearTimeout(copyTimer.current) }
+    return () => { active = false; clearTimeout(copyTimer.current); clearTimeout(translationCopyTimer.current) }
   }, [desktop, check])
 
   useEffect(() => {
     if (!desktop) return
     return desktop.onMentorText((payload) => {
-      if (payload.requestId === String(requestId.current)) setResult(payload.text)
+      if (running.current && payload.requestId === String(requestId.current)) setResult(payload.text)
+    })
+  }, [desktop])
+
+  useEffect(() => {
+    if (!desktop) return
+    return desktop.onTranslationText((payload) => {
+      if (payload.requestId !== String(requestId.current)) return
+      setTranslation(payload.text)
+      setTranslationComplete(payload.complete)
     })
   }, [desktop])
 
@@ -129,15 +143,23 @@ export default function App() {
   const runTranslation = useCallback(async (request: TranslationRequest, id: number) => {
     if (!desktop) return
     running.current = true
+    activeText.current = request.text
     setBusy(true)
     setError('')
     setResult('')
     setCopied(false)
     setStopped(false)
     setPendingQuestion(request.follow_up ?? '')
+    if (!request.follow_up) {
+      setTranslation('')
+      setTranslationComplete(false)
+      setTranslationCopied(false)
+    }
     followAnswer.current = true
     try {
-      const translation = await desktop.translate(request, String(id))
+      const translation = await desktop.translate({ ...request,
+        ...(!request.follow_up && request.source_language === 'en' ? { include_translation: true } : {}),
+      }, String(id))
       if (id === requestId.current) {
         setHistory((previous) => request.follow_up
           ? [...previous, { role: 'user', content: request.follow_up! }, { role: 'assistant', content: translation }]
@@ -145,6 +167,10 @@ export default function App() {
         setResult('')
         setPendingQuestion('')
         setConnection('online')
+        if (!request.follow_up) {
+          followAnswer.current = false
+          if (answerScroll.current) answerScroll.current.scrollTop = 0
+        }
       }
     } catch (error) {
       if (id === requestId.current) {
@@ -157,11 +183,24 @@ export default function App() {
   }, [desktop])
 
   const translate = useCallback(async () => {
-    if (running.current || !text.trim() || count > MAX_LENGTH) return
+    if (!text.trim() || count > MAX_LENGTH) return
+    if (running.current) {
+      // The source stays editable while translating; only an edited text replaces the running request.
+      if (text === activeText.current) return
+      const stale = ++requestId.current
+      running.current = false
+      try {
+        await desktop?.cancel()
+      } catch (error) {
+        if (stale === requestId.current) { setError(messageOf(error)); setBusy(false) }
+        return
+      }
+      if (stale !== requestId.current) return
+    }
     setHistory([])
     setQuestion('')
     await runTranslation({ text, focus, source_language: source, target_language: target }, ++requestId.current)
-  }, [runTranslation, text, focus, count, source, target])
+  }, [runTranslation, desktop, text, focus, count, source, target])
 
   const askFollowUp = useCallback(async () => {
     if (running.current || !history.length || !question.trim() || [...question].length > 2000) return
@@ -184,6 +223,9 @@ export default function App() {
       const detected = detectLanguage(selected)
       const id = ++requestId.current
       setText(selected)
+      setTranslation('')
+      setTranslationComplete(false)
+      setTranslationCopied(false)
       setHistory([])
       setQuestion('')
       setPendingQuestion('')
@@ -226,7 +268,11 @@ export default function App() {
   }, [desktop, translate, askFollowUp])
 
   function reset(nextText = '') {
+    ++requestId.current
     setText(nextText)
+    setTranslation('')
+    setTranslationComplete(false)
+    setTranslationCopied(false)
     setHistory([])
     setQuestion('')
     setPendingQuestion('')
@@ -245,8 +291,22 @@ export default function App() {
     finally { if (id === requestId.current) { running.current = false; setBusy(false); setStopped(true); setQuestion(pendingQuestion) } }
   }
 
+  async function clearSource() {
+    if (running.current) {
+      const id = ++requestId.current
+      running.current = false
+      try { await desktop?.cancel() } catch (error) { if (id === requestId.current) setError(messageOf(error)) }
+      finally { if (id === requestId.current) setBusy(false) }
+    }
+    reset(); textArea.current?.focus()
+  }
+
   async function paste() {
-    try { reset(await desktop!.readClipboard()); textArea.current?.focus() }
+    try {
+      const value = await desktop!.readClipboard()
+      if (running.current) { setText(value); textArea.current?.focus() }
+      else { reset(value); textArea.current?.focus() }
+    }
     catch (error) { setError(messageOf(error)) }
   }
 
@@ -256,6 +316,16 @@ export default function App() {
       setCopied(true)
       clearTimeout(copyTimer.current)
       copyTimer.current = setTimeout(() => setCopied(false), 2000)
+    } catch (error) { setError(messageOf(error)) }
+  }
+
+  async function copyTranslation() {
+    if (!desktop || !translationComplete) return
+    try {
+      await desktop.writeClipboard(translation)
+      setTranslationCopied(true)
+      clearTimeout(translationCopyTimer.current)
+      translationCopyTimer.current = setTimeout(() => setTranslationCopied(false), 2000)
     } catch (error) { setError(messageOf(error)) }
   }
 
@@ -303,11 +373,15 @@ export default function App() {
                 {source === 'en' && <IconButton className={`icon-button ${speaking ? 'reading' : ''}`} label={speaking || speechStarting ? 'Stop reading' : 'Read English aloud'} disabled={!desktop || !/\p{Script=Latin}/u.test(text) || count > MAX_LENGTH} onClick={() => void readAloud()}>
                   {speaking || speechStarting ? <Square size={15} /> : <Volume2 size={17} />}
                 </IconButton>}
-                <IconButton className="icon-button" label="Paste text" disabled={busy || !desktop} onClick={() => void paste()}><Clipboard size={16} /></IconButton>
-                <IconButton className="icon-button" label="Clear text" disabled={busy || !text} onClick={() => { reset(); textArea.current?.focus() }}><X size={17} /></IconButton>
+                <IconButton className="icon-button" label="Paste text" disabled={!desktop} onClick={() => void paste()}><Clipboard size={16} /></IconButton>
+                <IconButton className="icon-button" label="Clear text" disabled={!text} onClick={() => void clearSource()}><X size={17} /></IconButton>
               </div>
             </div>
-            <textarea ref={textArea} aria-label="Text to translate" placeholder="Enter a word, phrase, or sentence..." value={text} readOnly={busy} spellCheck={false} autoFocus onChange={(event) => reset(event.target.value)} onKeyDown={(event) => {
+            <textarea ref={textArea} aria-label="Text to translate" placeholder="Enter a word, phrase, or sentence..." value={text} spellCheck={false} autoFocus onChange={(event) => {
+              const value = event.target.value
+              if (busy) { setText(value); return }
+              reset(value)
+            }} onKeyDown={(event) => {
               if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return
               if (event.key === 'Enter' && !event.shiftKey && !event.altKey) {
                 event.preventDefault()
@@ -318,6 +392,8 @@ export default function App() {
             {speechError && <div className="speech-error" role="alert">{speechError}</div>}
             <div className="focus-field"><label htmlFor="focus-word">Focus word or phrase <span>Optional</span></label>
               <input id="focus-word" value={focus} disabled={busy} maxLength={200} placeholder="capture" onChange={(event) => {
+                ++requestId.current
+                setTranslation(''); setTranslationComplete(false); setTranslationCopied(false)
                 setFocus(event.target.value); setResult(''); setHistory([]); setQuestion(''); setPendingQuestion(''); setError('')
               }} /></div>
           </section>
@@ -330,11 +406,33 @@ export default function App() {
               const el = answerScroll.current!
               followAnswer.current = el.scrollHeight - el.scrollTop - el.clientHeight < 70
             }}>
+              {source === 'en' && (busy || translation || latestAnswer) && <section className="direct-translation" aria-label="Chinese translation">
+                <div className="direct-translation-header"><h2>Translation</h2>
+                  <IconButton className="icon-button" label={translationCopied ? 'Translation copied' : 'Copy Chinese translation'} disabled={!desktop || !translationComplete || !translation} onClick={() => void copyTranslation()}>
+                    {translationCopied ? <Check size={16} /> : <Copy size={16} />}
+                  </IconButton>
+                </div>
+                {translation
+                  ? <div className="direct-translation-text" lang="zh-CN" aria-busy={!translationComplete && busy}>{translation}{!translationComplete && busy && <span className="stream-caret" aria-hidden="true" />}</div>
+                  : busy
+                    ? <div className="skeleton-lines" role="status" aria-label="Translating"><span className="skeleton-line" style={{ width: '82%' }} /><span className="skeleton-line" style={{ width: '54%' }} /></div>
+                    : <div className="direct-translation-text empty">Translation unavailable</div>}
+                {!translationComplete && translation && !busy && <span className="translation-status">Partial translation</span>}
+              </section>}
               {history.map((message, index) => message.role === 'user'
                 ? <div key={index} className="learner-question">{message.content}</div>
                 : <article key={index} className="mentor-turn"><MentorAnswer text={message.content} /></article>)}
               {pendingQuestion && <div className="learner-question">{pendingQuestion}</div>}
-              {result ? <article className="mentor-turn"><MentorAnswer text={result} /></article> : busy ? <div className="loading"><LoaderCircle size={20} className="spin" /><span>Thinking...</span></div> : null}
+              {result
+                ? <article className="mentor-turn"><MentorAnswer text={result} /><span className="stream-caret" aria-hidden="true" /></article>
+                : busy
+                  ? <div className="mentor-skeleton" role="status" aria-label="Writing explanation">
+                      <span className="skeleton-line skeleton-heading" style={{ width: '38%' }} />
+                      <span className="skeleton-line" style={{ width: '94%' }} />
+                      <span className="skeleton-line" style={{ width: '88%' }} />
+                      <span className="skeleton-line" style={{ width: '62%' }} />
+                    </div>
+                  : null}
             </div>
             <div className="output-meta" role="status">{busy ? <><LoaderCircle size={12} className="spin" />Explaining...</> : copied ? 'Copied to clipboard' : stopped ? 'Stopped · Partial explanation' : latestAnswer ? 'Language mentor' : ''}</div>
             {history.length > 0 && <form className="follow-up-composer" onSubmit={(event) => { event.preventDefault(); void askFollowUp() }}>

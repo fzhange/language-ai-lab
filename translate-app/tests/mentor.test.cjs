@@ -49,6 +49,27 @@ test('reasoning content is never rendered', () => {
   assert.equal(textOf([{ type: 'reasoning', text: 'private' }, { type: 'text', text: 'visible' }]), 'visible')
 })
 
+test('interleaved translation and teaching tokens are kept separate and independently completed', async () => {
+  const translated = []
+  const teaching = []
+  const translationToken = (text) => ({ event: 'messages', data: [{ type: 'ai', content: text }, { langgraph_node: 'direct_translation' }] })
+  const result = await explain('http://localhost:2024', { ...request, include_translation: true }, {
+    client: fake([translationToken('捕获'), token('Teaching'), translationToken('选中内容。'),
+      { event: 'values', data: { translation: '捕获选中内容。' } },
+      token(' notes'), { event: 'values', data: { explanation: 'Teaching notes', translation: '捕获选中内容。' } }]),
+    onText: (text) => teaching.push(text), onTranslation: (text, complete) => translated.push({ text, complete }),
+  })
+  assert.equal(result, 'Teaching notes')
+  assert.equal(teaching[0], 'Teaching')
+  assert.deepEqual(translated.slice(0, 3), [
+    { text: '捕获', complete: false }, { text: '捕获选中内容。', complete: false }, { text: '捕获选中内容。', complete: true },
+  ])
+  await assert.rejects(explain('http://localhost:2024', { ...request, include_translation: true }, {
+    client: fake([{ event: 'values', data: { explanation: 'Teaching' } }]),
+  }), /no Chinese translation/)
+  assert.throws(() => validateMentorRequest({ ...request, include_translation: 'true' }))
+})
+
 test('truncated streams and SSE errors do not report success', async () => {
   await assert.rejects(explain('http://localhost:2024', request, { client: fake([token('partial')]) }), /before completion/)
   await assert.rejects(explain('http://localhost:2024', request, { client: fake([{ event: 'error', data: { message: 'private model detail' } }]) }), /could not finish/)

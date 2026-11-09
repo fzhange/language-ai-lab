@@ -22,6 +22,10 @@ test('native app: secure preload, HTTP translation, clipboard, hide and wake', a
       : '## 译文\nUnderstand, don\'t memorize.\n\n## 用法与区别\nunderstand 强调理解含义。'
     const send = (event, data) => response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
     const firstChunk = payload.input.follow_up ? 'digest 是名词，' : '## 译文\n'
+    if (payload.input.include_translation) {
+      send('messages', [{ type: 'ai', content: '理解，而非死记。' }, { langgraph_node: 'direct_translation' }])
+      send('values', { translation: '理解，而非死记。' })
+    }
     send('messages', [{ type: 'ai', content: firstChunk }, { langgraph_node: 'explain' }])
     if (requests.length === 1) await new Promise((resolve) => { continueStream = resolve })
     send('messages', [{ type: 'ai', content: answer.slice(firstChunk.length) }, { langgraph_node: 'explain' }])
@@ -65,6 +69,9 @@ test('native app: secure preload, HTTP translation, clipboard, hide and wake', a
     await expect(page.getByRole('heading', { name: '译文' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible()
     await expect(page.getByRole('heading', { name: '例句' })).not.toBeVisible()
+    await expect(page.getByRole('region', { name: 'Chinese translation' })).toContainText('理解，而非死记。')
+    await page.getByRole('button', { name: 'Copy Chinese translation' }).click()
+    expect(await app.evaluate(({ clipboard }) => clipboard.readText())).toBe('理解，而非死记。')
     continueStream()
     await expect(page.getByRole('heading', { name: '例句' })).toBeVisible()
     await page.getByRole('button', { name: 'Copy explanation' }).click()
@@ -72,6 +79,7 @@ test('native app: secure preload, HTTP translation, clipboard, hide and wake', a
     expect(requests[0].assistant_id).toBe('translation-mentor')
     expect(requests[0].stream_mode).toEqual(['messages-tuple', 'values'])
     expect(requests[0].on_completion).toBe('delete')
+    expect(requests[0].input.include_translation).toBe(true)
     const followUp = page.getByRole('textbox', { name: 'Follow-up question' })
     await followUp.fill('这个词和 summary 有什么区别？')
     await followUp.press('Enter')

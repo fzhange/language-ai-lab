@@ -7,6 +7,11 @@ contextBridge.exposeInMainWorld('desktop', {
     ipcRenderer.on('mentor:text', listener)
     return () => ipcRenderer.removeListener('mentor:text', listener)
   },
+  onTranslationText: (callback) => {
+    const listener = (_event, payload) => callback(payload)
+    ipcRenderer.on('translation:text', listener)
+    return () => ipcRenderer.removeListener('translation:text', listener)
+  },
   cancel: () => ipcRenderer.invoke('translation:cancel'),
   readAloud: (text, requestId) => ipcRenderer.invoke('speech:read', text, requestId),
   stopReading: () => ipcRenderer.invoke('speech:stop'),

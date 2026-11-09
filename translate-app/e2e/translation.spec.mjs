@@ -8,6 +8,7 @@ test.beforeEach(async ({ page }) => {
     window.testClipboard = 'Hello, world.'
     window.testSettings = { serviceUrl: 'http://127.0.0.1:2024', shortcutRegistered: true }
     window.testTextListener = () => {}
+    window.testTranslationListener = () => {}
     window.testSpeechListener = () => {}
     window.testReadRequests = []
     window.desktop = {
@@ -15,6 +16,7 @@ test.beforeEach(async ({ page }) => {
         window.testRequests.push(request)
         if (request.text === 'fail') throw new Error('Cannot reach the agent service.')
         if (request.follow_up === 'fail') throw new Error('Follow-up service unavailable.')
+        if (request.include_translation) window.testTranslationListener({ requestId, text: '捕获选中内容。', complete: request.text !== 'slow' })
         if (request.text === 'slow' || request.follow_up === 'slow') {
           window.testTextListener({ requestId, text: '## 译文\n正在解释' })
           return new Promise((resolve) => { window.resolveTranslation = (text) => {
@@ -26,6 +28,7 @@ test.beforeEach(async ({ page }) => {
         return text
       },
       onMentorText: (callback) => { window.testTextListener = callback; return () => {} },
+      onTranslationText: (callback) => { window.testTranslationListener = callback; return () => {} },
       cancel: async () => {},
       readAloud: async (text, requestId) => {
         window.testReadRequests.push(text)
@@ -68,6 +71,50 @@ test('word and sentence input renders mentor Markdown, context and examples', as
   await page.getByRole('button', { name: 'Copy explanation' }).click()
   expect(await page.evaluate(() => window.testClipboard)).toBe(answer)
   await page.screenshot({ path: 'test-results/mentor-answer.png', fullPage: true })
+})
+
+test('English input shows a separately copyable Chinese translation alongside mentor content', async ({ page }) => {
+  const source = page.getByRole('textbox', { name: 'Text to translate' })
+  await source.fill('capture')
+  await source.press('Enter')
+  const translation = page.getByRole('region', { name: 'Chinese translation' })
+  await expect(translation).toContainText('捕获选中内容。')
+  await page.getByRole('button', { name: 'Copy Chinese translation' }).click()
+  expect(await page.evaluate(() => window.testClipboard)).toBe('捕获选中内容。')
+  await expect(page.getByRole('heading', { name: '用法与区别' })).toBeVisible()
+  await page.screenshot({ path: 'test-results/translation-and-mentor.png', fullPage: true })
+  await page.getByRole('textbox', { name: 'Follow-up question' }).fill('为什么？')
+  await page.getByRole('button', { name: 'Send follow-up' }).click()
+  await expect(translation).toContainText('捕获选中内容。')
+  expect(await page.evaluate(() => window.testRequests[0].include_translation)).toBe(true)
+  expect(await page.evaluate(() => window.testRequests[1].include_translation)).toBeUndefined()
+  await source.fill('中文输入')
+  await source.press('Enter')
+  await expect(translation).not.toBeVisible()
+})
+
+test('partial translations cannot be copied and late translation events cannot repaint a new source', async ({ page }) => {
+  await page.getByRole('textbox', { name: 'Text to translate' }).fill('slow')
+  await page.getByRole('button', { name: 'Explain', exact: true }).click()
+  await expect(page.getByRole('region', { name: 'Chinese translation' })).toContainText('捕获选中内容。')
+  await expect(page.getByRole('button', { name: 'Copy Chinese translation' })).toBeDisabled()
+  await page.getByRole('button', { name: 'Stop', exact: true }).click()
+  await page.getByRole('textbox', { name: 'Text to translate' }).fill('new source')
+  await page.evaluate(() => window.testTranslationListener({ requestId: '1', text: 'stale translation', complete: true }))
+  await expect(page.getByRole('region', { name: 'Chinese translation' })).not.toBeVisible()
+})
+
+test('late completion events never duplicate a committed mentor answer or restore cleared translation', async ({ page }) => {
+  const source = page.getByRole('textbox', { name: 'Text to translate' })
+  await source.fill('capture')
+  await source.press('Enter')
+  await expect(page.getByRole('heading', { name: '例句' })).toHaveCount(1)
+  await page.evaluate(() => window.testTextListener({ requestId: '2', text: '## 例句\nLate duplicate' }))
+  await expect(page.getByRole('heading', { name: '例句' })).toHaveCount(1)
+  await expect(page.getByRole('region', { name: 'Mentor explanation' })).not.toContainText('Late duplicate')
+  await source.fill('new English source')
+  await page.evaluate(() => window.testTranslationListener({ requestId: '2', text: 'stale translation', complete: true }))
+  await expect(page.getByRole('region', { name: 'Chinese translation' })).not.toBeVisible()
 })
 
 test('English source read-aloud starts only on click and stops, completes or resets safely', async ({ page }) => {
@@ -165,6 +212,22 @@ test('Enter respects empty input, running requests and IME composition', async (
   await input.press('Enter')
   expect(await page.evaluate(() => window.testRequests.map((request) => request.text))).toEqual(['slow'])
   await page.getByRole('button', { name: 'Stop', exact: true }).click()
+})
+
+test('source stays editable while translating; edited text replaces the running request', async ({ page }) => {
+  const input = page.getByRole('textbox', { name: 'Text to translate' })
+  await input.fill('slow')
+  await input.press('Enter')
+  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible()
+  // Typing during the run keeps the source editable without cancelling the request.
+  await input.press('End')
+  await page.keyboard.insertText(' now')
+  await expect(input).toHaveValue('slow now')
+  expect(await page.evaluate(() => window.testRequests.map((request) => request.text))).toEqual(['slow'])
+  // Submitting the edited text cancels the old run and starts a new one.
+  await input.press('Enter')
+  await expect(page.getByRole('heading', { name: '语境与含义' })).toBeVisible()
+  expect(await page.evaluate(() => window.testRequests.map((request) => request.text))).toEqual(['slow', 'slow now'])
 })
 
 test('Enter in Settings does not ask the mentor', async ({ page }) => {

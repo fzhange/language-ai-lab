@@ -145,6 +145,9 @@ else {
           onText: (text) => {
             if (!current.signal.aborted && !window.isDestroyed()) window.webContents.send('mentor:text', { requestId, text })
           },
+          onTranslation: (text, complete) => {
+            if (!current.signal.aborted && !window.isDestroyed()) window.webContents.send('translation:text', { requestId, text, complete })
+          },
         })
       } catch (error) {
         if (current.signal.aborted) throw new Error(current.signal.reason === 'timeout'

@@ -34,10 +34,14 @@ function validateMentorRequest(request) {
   if (messages.reduce((sum, message) => sum + [...message.content].length, 0) > 120000) {
     throw new Error('Conversation is too long. Start a new explanation.')
   }
-  return { ...input, focus: focus.trim(), ...(followUp ? { follow_up: followUp.trim(), history: messages } : {}) }
+  if (request.include_translation !== undefined && typeof request.include_translation !== 'boolean') {
+    throw new Error('Invalid translation option.')
+  }
+  return { ...input, focus: focus.trim(), ...(request.include_translation ? { include_translation: true } : {}),
+    ...(followUp ? { follow_up: followUp.trim(), history: messages } : {}) }
 }
 
-async function explain(url, request, { signal, apiKey, onText = () => {}, fetchImpl = fetch, client } = {}) {
+async function explain(url, request, { signal, apiKey, onText = () => {}, onTranslation = () => {}, fetchImpl = fetch, client } = {}) {
   const input = validateMentorRequest(request)
   const sdk = client ?? new Client({
     apiUrl: validateUrl(url), apiKey: apiKey || null,
@@ -46,6 +50,8 @@ async function explain(url, request, { signal, apiKey, onText = () => {}, fetchI
   })
   let text = ''
   let final = false
+  let translation = ''
+  let translationComplete = false
   for await (const event of sdk.runs.stream(null, 'translation-mentor', {
     input, streamMode: ['messages-tuple', 'values'], onDisconnect: 'cancel', onCompletion: 'delete', signal,
   })) {
@@ -57,16 +63,27 @@ async function explain(url, request, { signal, apiKey, onText = () => {}, fetchI
         const delta = textOf(message.content)
         if (delta) { text += delta; onText(text) }
       }
+      if (metadata?.langgraph_node === 'direct_translation' && ['ai', 'AIMessageChunk'].includes(message?.type)) {
+        const delta = textOf(message.content)
+        if (delta) { translation += delta; onTranslation(translation, false) }
+      }
     }
     if (event.event === 'values' && typeof event.data?.explanation === 'string') {
       text = event.data.explanation
       final = true
       onText(text)
     }
+    if (event.event === 'values' && typeof event.data?.translation === 'string') {
+      translation = event.data.translation
+      translationComplete = true
+      onTranslation(translation, true)
+    }
   }
   signal?.throwIfAborted()
   if (!final) throw new Error('The mentor stream ended before completion. Retry to receive the full explanation.')
   if (!text.trim()) throw new Error('The mentor returned no explanation.')
+  if (input.include_translation && input.source_language === 'en' && !input.follow_up
+      && (!translationComplete || !translation.trim())) throw new Error('The service returned no Chinese translation. Update the mentor graph and retry.')
   return text
 }
 

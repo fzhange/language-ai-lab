@@ -12,6 +12,7 @@ export interface TranslationRequest {
   focus?: string
   follow_up?: string
   history?: ConversationMessage[]
+  include_translation?: boolean
 }
 
 export interface Settings {
@@ -27,6 +28,7 @@ export interface WakePayload {
 export interface DesktopBridge {
   translate(request: TranslationRequest, requestId: string): Promise<string>
   onMentorText(callback: (payload: { requestId: string; text: string }) => void): () => void
+  onTranslationText(callback: (payload: { requestId: string; text: string; complete: boolean }) => void): () => void
   cancel(): Promise<void>
   readAloud(text: string, requestId: string): Promise<boolean>
   stopReading(): Promise<void>

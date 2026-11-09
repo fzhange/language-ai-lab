@@ -16,6 +16,11 @@ The model runs in `generic-agent-service`, not in the desktop app.
   context, IPA pronunciation, useful chunks, expression contrasts, and examples.
   Words include part of speech and UK/US IPA; short phrases can include phrase
   IPA, and sentences show focus/key-word pronunciation rather than a long transcript.
+- English input also shows a traditional, plain Chinese translation above the
+  existing mentor answer. Copy Chinese translation copies only that result, not
+  pronunciation or teaching notes. Both model outputs stream independently through
+  the same SSE run. This adds one translation model call for initial English input;
+  Chinese input and follow-up questions do not make the extra translation call.
 - The model distinguishes vocabulary from sentences semantically, including
   unpunctuated sentences. The client does not fabricate teaching or IPA. Model
   pronunciations and alternatives can still be imperfect and should be checked
@@ -134,6 +139,10 @@ The UI offers a 180-second timeout and Stop. Stop preserves partial teaching,
 ignores late tokens, and aborts the SSE request (`on_disconnect=cancel`). A new
 Command+B selection cancels/drains the prior request before starting another.
 The legacy `translator` graph remains available for translation-only API clients.
+Initial English requests additionally set `include_translation: true`. The returned
+state then has `translation` as well as `explanation`. The `direct_translation`
+node reuses the existing translation-only prompt; the `explain` node is unchanged.
+Older callers omitting this flag keep the previous single-model behavior.
 
 For follow-ups, include `follow_up` and `history` in the same input while keeping
 the original `text`, direction, and focus. History starts with the initial mentor

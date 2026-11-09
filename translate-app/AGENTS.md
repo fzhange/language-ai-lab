@@ -25,6 +25,10 @@ Read `../AGENTS.md` first. This folder owns the macOS Electron translation clien
   process. Never auto-play; stop on text changes/hide/quit. Use a fixed English
   voice and stdin for text, never a shell. English comprehension prompts include
   IPA/part of speech; the renderer must not fabricate phonetic transcriptions.
+- Initial English input requests `include_translation=true`: a plain Chinese
+  translation streams separately from mentor teaching, with its own copy button.
+  Route tokens by graph node, never extract translation by parsing mentor Markdown.
+  Follow-ups keep the completed translation; Chinese input keeps expression coaching.
 - Follow-up questions keep the original source and direction; send bounded
   completed user/assistant history plus `follow_up` with each stateless SSE run.
   Keep conversation in renderer memory only, not files/localStorage/Supabase.
