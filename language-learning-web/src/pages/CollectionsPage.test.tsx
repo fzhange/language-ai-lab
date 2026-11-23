@@ -33,7 +33,6 @@ vi.mock('../components/CollectionEditor', () => ({
   ),
 }))
 vi.mock('../components/AuthGate', () => ({ AuthGate: ({ children }: { children: React.ReactNode }) => children }))
-vi.mock('@langchain/react', () => ({ useStream: () => ({ messages: [], values: {}, isLoading: false }) }))
 
 import App from '../App'
 import { CollectionsPage } from './CollectionsPage'

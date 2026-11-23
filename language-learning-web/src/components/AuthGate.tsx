@@ -1,4 +1,4 @@
-/** 登录门：Supabase 已配置时要求邮箱登录；未配置时放行（仅聊天可用）。 */
+/** 登录门：Supabase 已配置时要求邮箱登录；未配置时放行知识库阅读。 */
 
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { GraduationCap, Sparkles } from 'lucide-react'

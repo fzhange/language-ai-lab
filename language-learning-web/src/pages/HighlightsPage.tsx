@@ -1,8 +1,7 @@
 /** 我的高亮页：读取 Supabase whw_highlights，按网址、标题、日期或高亮频次查看。 */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { ArrowUpRight, ChevronDown, Highlighter, Search, Sparkles, X } from 'lucide-react'
+import { ArrowUpRight, ChevronDown, Highlighter, Search, X } from 'lucide-react'
 
 import { MarkdownView } from '../components/MarkdownView'
 import { Badge } from '../components/ui/badge'
@@ -226,7 +225,6 @@ export function HighlightsPage() {
                               {item.insight && <div className="border-l-2 border-amber-400 pl-3"><span className="font-semibold text-foreground">心得：</span><MarkdownView compact>{item.insight}</MarkdownView></div>}
                               <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm">
                                 <a href={item.page_url} target="_blank" rel="noreferrer" aria-label={`来源：${item.page_title || item.page_url}`} className="inline-flex items-center gap-1 font-medium text-primary hover:underline">打开原网页<ArrowUpRight className="size-4" /></a>
-                                <Link to="/" state={{ prefill: `帮我讲讲这句话：${item.exact}` }} className="inline-flex items-center gap-1 font-medium text-primary hover:underline"><Sparkles className="size-4" />问导师</Link>
                               </div>
                             </div>
                           ))}
@@ -278,13 +276,6 @@ export function HighlightsPage() {
                   )}
                   <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
                     <span>{item.created_at ? new Date(item.created_at).toLocaleString() : ''}</span>
-                    <Link
-                      to="/"
-                      state={{ prefill: `帮我讲讲这句话：${item.exact}` }}
-                      className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
-                    >
-                      <Sparkles className="size-3.5" />问导师
-                    </Link>
                   </div>
                 </li>
               ))}
