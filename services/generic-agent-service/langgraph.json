@@ -1,0 +1,15 @@
+{
+  "python_version": "3.13",
+  "dependencies": ["."],
+  "graphs": {
+    "highlight-buddy": "./assistants/highlight_buddy/agent.py:make_highlight_buddy",
+    "highlight-quiz": "./assistants/highlight_buddy/study.py:make_quiz_graph",
+    "highlight-report": "./assistants/highlight_buddy/study.py:make_report_graph",
+    "translator": "./assistants/translator/agent.py:make_translation_graph",
+    "translation-mentor": "./assistants/translator/mentor.py:make_translation_mentor_graph"
+  },
+  "http": {
+    "app": "./http_api/app.py:app"
+  },
+  "env": ".env"
+}
